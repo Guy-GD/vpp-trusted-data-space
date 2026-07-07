@@ -1,0 +1,22 @@
+﻿name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  repo-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check required files
+        run: |
+          test -f README.md
+          test -f demo/video-storyboard.md
+          test -d apps/web-dashboard
+          test -d services/federated-learning
+          test -d services/privacy-compute
+          test -d services/ledger-service
+          test -d services/ai-agent
