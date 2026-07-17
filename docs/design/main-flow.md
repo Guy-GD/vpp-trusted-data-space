@@ -17,8 +17,9 @@
 1. `apps/web-dashboard` 只访问 `services/api-gateway`。
 2. `api-gateway` 负责编排，不实现加密、联邦学习、MPC 或 Agent 算法。
 3. 业务模块通过固定 HTTP API 通信；所有模块提供 `GET /health`。
-4. 原始电表明文、主体本地训练数据和未保护模型参数不出主体本地数据域。
-5. `ledger-service` 只保存事件、摘要、引用地址和哈希链，不保存原始明文数据。
+4. 第一周仅 `api-gateway` 负责跨模块编排和调用 `ledger-service`；其他业务模块不得直接调用 `ledger-service`。
+5. 原始电表明文、主体本地训练数据和未保护模型参数不出主体本地数据域。
+6. `ledger-service` 只保存事件、摘要、引用地址和哈希链，不保存原始明文数据。
 
 ## 2. 参与模块与责任
 
@@ -67,13 +68,14 @@ sequenceDiagram
     GW->>FL: POST /api/v1/fl/tasks
     FL-->>GW: trainingTaskId
     GW->>FL: POST /api/v1/fl/tasks/{taskId}/start
+    FL-->>GW: currentRound=1 + updates
     loop 每个训练轮次
-        FL->>Privacy: POST /api/v1/privacy/secure-aggregate
-        Privacy-->>FL: aggregateId + aggregateHash
-        FL->>Ledger: secure_aggregation_finished
+        GW->>Privacy: POST /api/v1/privacy/secure-aggregate
+        Privacy-->>GW: aggregateId + aggregateResultUri + aggregateHash
+        GW->>FL: POST /api/v1/fl/tasks/{taskId}/rounds/{roundId}/aggregate
+        FL-->>GW: status + nextRound + updates / final modelHash + metrics
+        GW->>Ledger: secure_aggregation_finished
     end
-    GW->>FL: POST /api/v1/fl/tasks/{taskId}/rounds/{roundId}/aggregate
-    FL-->>GW: globalModelVersion + metrics
     GW->>Ledger: global_model_created
     GW->>Agent: POST /api/v1/agent/predict
     Agent-->>GW: prediction
@@ -108,17 +110,18 @@ sequenceDiagram
 
 1. 网关创建训练任务并声明参与方、资产、目标、算法和轮次。
 2. 联邦学习服务在单服务内模拟多个本地客户端，每个客户端只加载自己的数据分片。
-3. 每轮本地训练产生模型更新、样本数和更新摘要，不上传原始数据。
-4. 参数更新交给隐私计算服务执行安全掩码、同态加密演示或 MPC 风格聚合。
-5. 隐私计算返回 `aggregateId`、结果 URI、参与方数量和 `aggregateHash`。
-6. 联邦学习执行 FedAvg，计算 MAE、RMSE、MAPE，并生成 `global_model_vN`。
-7. 训练开始、参数提交、安全聚合、模型生成和评估事件交给账本存证。
+3. `POST .../start` 固定返回第 1 轮 `currentRound: 1` 和完整 `updates[]`；每项包含 `participantDid`、`sampleCount`、`modelUpdateUri`、`updateHash`，不上传原始数据。
+4. `POST .../rounds/{roundId}/updates` 的 `taskId`、`roundId` 只来自路径；请求体只包含 `participantDid`、`sampleCount`、`modelUpdateUri`、`updateHash`。
+5. 每轮都由网关先把当前 `updates` 交给 `POST /api/v1/privacy/secure-aggregate`，再把返回的 `aggregateId`、`aggregateResultUri`、`aggregateHash` 交给 FL aggregate 执行 FedAvg。FL aggregate 的请求体只包含这三个字段；`taskId`、`roundId` 只来自路径。
+6. 非最终轮 FL aggregate 返回 `status: running`、整数 `nextRound` 和下一轮完整 `updates[]`，网关据此继续下一轮 secure-aggregate 与 FL aggregate。
+7. 最终轮 FL aggregate 返回 `status: completed`、`nextRound: null`、`updates: []`，并返回最终 `globalModelVersion`、`modelHash`、`metrics`（MAE、RMSE、MAPE）。
+8. 网关将训练开始、参数提交、每轮安全聚合、最终模型生成和评估事件交给账本存证；业务服务不直接写账本。
 
 ### 4.4 Agent 业务输出
 
 1. Agent 使用指定或最新 `global_model_vN` 生成预测。
 2. Agent 根据预测、市场价格和场景生成交易策略建议。
-3. Agent 查询账本证据链摘要，生成审计问答或报告。
+3. 网关查询账本证据链后提供 `evidenceEventIds`；Agent 基于该证据引用生成审计问答或报告，不直接调用账本服务。
 4. 网关记录 Agent 调用与报告生成事件，并将结果汇总给前端。
 
 ## 5. 状态与幂等
@@ -132,18 +135,18 @@ CREATED -> COLLECTING -> DATA_REGISTERED -> AUTHORIZED -> TRAINING
 
 任意状态可进入 `FAILED`；失败任务可进入 `RETRYING` 后回到原状态或再次失败。`GET /api/v1/demo/status/{businessId}` 只查询状态，不重复执行流程。
 
-以下操作必须支持 `Idempotency-Key`：批次生成、资产登记、授权申请/审批、训练任务创建/启动、轮次聚合、报告生成和账本存证。同一 Key 重试返回首次结果；请求体不同返回 `40901`。
+`traceId`、幂等键和错误码的统一规则以 [公共响应与错误码](../api/response-and-errors.md) 为准；本流程不重复定义这些公共契约。
 
 ## 6. 失败处理与补偿
 
 | 阶段 | 失败示例 | 网关处理 | 是否继续 |
 |---|---|---|---|
 | 源端采集 | 模拟器不可用、参数非法 | 标记 `FAILED`，按原 Key 重试 | 否 |
-| 数据接入 | 验签失败、哈希不匹配 | 返回 `40103`/`40104`，记录失败事件 | 否 |
-| 授权 | DID 不存在、授权过期 | 返回 `40102`/`40303`，不创建训练任务 | 否 |
-| 本地训练 | 参与方未就绪、样本不足 | 保留任务状态，返回 `42201`/`42202` | 否 |
+| 数据接入 | 验签失败、哈希不匹配 | 返回公共契约定义的校验错误，记录失败事件 | 否 |
+| 授权 | DID 不存在、授权过期 | 返回公共契约定义的授权错误，不创建训练任务 | 否 |
+| 本地训练 | 参与方未就绪、样本不足 | 保留任务状态，返回公共契约定义的训练错误 | 否 |
 | 安全聚合 | 模式不支持、更新不足 | 当前轮次失败，可重试该轮次 | 否 |
-| 存证 | 账本不可用 | 不宣称流程完成，返回 `50203`/`50302` | 否 |
+| 存证 | 账本不可用 | 不宣称流程完成，返回公共契约定义的依赖错误 | 否 |
 | Agent | 模型不存在、报告失败 | 单独标记 Agent 失败，允许重新调用 | 按产品策略 |
 
 不删除已完成的采集、授权、训练轮次和模型版本；补偿动作使用同一 `businessId`、`traceId` 和错误码。
@@ -162,9 +165,10 @@ CREATED -> COLLECTING -> DATA_REGISTERED -> AUTHORIZED -> TRAINING
   "globalModelVersion": "global_model_v1",
   "metrics": { "mae": 2.31, "rmse": 3.72, "mape": 0.081 },
   "predictionId": "prediction_001",
+  "strategyId": "strategy_001",
   "auditReportId": "report_001",
   "ledgerTxIds": ["tx_data_001", "tx_auth_001", "tx_model_001", "tx_agent_001"]
 }
 ```
 
-前端只依赖汇总结果和状态查询，不依赖下游模块内部存储地址或算法实现。
+完整响应的公共包络还包含与响应头相同的 `traceId`。前端只依赖汇总结果、`traceId` 和状态查询，不依赖下游模块内部存储地址或算法实现。

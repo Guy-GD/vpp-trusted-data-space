@@ -4,20 +4,23 @@
 
 ## 1. 适用范围
 
-适用于 `api-gateway`、`meter-simulator`、`data-ingestion`、`identity-did`、`federated-learning`、`privacy-compute`、`ledger-service`、`ai-agent` 的所有业务接口和 `GET /health`。
+适用于 `api-gateway`、`meter-simulator`、`data-ingestion`、`identity-did`、`federated-learning`、`privacy-compute`、`ledger-service`、`ai-agent` 的所有业务接口和 `GET /health`。八个后端统一安装 `packages/common`，不得复制或自行修改响应、错误码、追踪和 ID 生成实现。
 
 接口路径、请求字段和模块边界以 `docs/api/openapi.md` 与 `docs/design/module-contracts.md` 为准；本文件只定义跨模块通用规则。
 
 ## 2. 统一成功响应
 
-所有 HTTP 响应均使用以下包络：
+所有成功 HTTP 响应的实际 JSON 键集合固定为 `code`、`message`、`data`、`traceId`、`timestamp`，不得出现 `details` 或模块自定义根字段。
+
+成功响应示例：
 
 ```json
 {
   "code": 0,
   "message": "ok",
   "data": {},
-  "traceId": "trace_20260710_000001"
+  "traceId": "trace_20260710_000001",
+  "timestamp": "2026-07-10T02:00:00Z"
 }
 ```
 
@@ -27,16 +30,18 @@
 | `message` | string | 是 | 面向调用方的简短稳定说明。 |
 | `data` | object/array/null | 是 | 业务结果；无内容时固定为 `null`。 |
 | `traceId` | string | 是 | 请求链路追踪 ID；网关生成并向下游传递。 |
-| `requestId` | string | 否 | 服务内部请求 ID。 |
-| `timestamp` | string | 否 | ISO 8601 响应时间。 |
+| `timestamp` | string | 是 | UTC ISO 8601 响应时间。 |
 
 约定：
 
 1. 业务成功只返回 `code: 0`，不得用 HTTP 200 搭配非零 `code` 表示失败。
 2. `data` 结构由具体接口定义，不得把业务字段平铺到响应根部。
-3. `message` 不得包含密钥、明文电表数据、模型参数或内部堆栈。
+3. `message` 固定为 `ok`，`success()` 不提供公开覆盖参数。
+4. `message` 不得包含密钥、明文电表数据、模型参数或内部堆栈。
 
 ## 3. 统一错误响应
+
+失败响应示例：
 
 ```json
 {
@@ -44,6 +49,7 @@
   "message": "invalid request",
   "data": null,
   "traceId": "trace_20260710_000001",
+  "timestamp": "2026-07-10T02:00:00Z",
   "details": [
     { "field": "participants", "reason": "must not be empty" }
   ]
@@ -56,7 +62,18 @@
 | `message` | string | 是 | 稳定英文短语。 |
 | `data` | null | 是 | 错误时固定为 `null`。 |
 | `traceId` | string | 是 | 跨服务排查标识。 |
+| `timestamp` | string | 是 | UTC ISO 8601 响应时间。 |
 | `details` | array | 否 | 字段级校验或下游错误详情，不得泄露敏感数据。 |
+
+失败响应始终包含 `code`、`message`、`data: null`、`traceId`、`timestamp`。仅在存在字段级详情时返回 `details`；没有详情时实际 JSON 不得包含该键。`failure()` 与 `ServiceError` 的 `message` 始终来自下方冻结目录，不提供公开覆盖参数，也不得返回内部异常文本。
+
+### 3.1 HTTP 失败构造边界
+
+`failure()` 保持冻结公开导出并返回 `ApiResponse`，但它只用于异常处理器/非 HTTP 场景的包络构造器。HTTP 路由业务失败必须 `raise ServiceError(code, details=...)`，由统一异常处理器按错误码设置非 200 HTTP 状态并生成统一包络。
+
+**禁止在 FastAPI 路由中直接 `return failure(...)`。** 普通返回值会沿成功响应路径保持 HTTP `200`；公共包不使用响应体中间件检查业务码并猜测 HTTP 状态。
+
+`details=[]` 与无详情语义相同：`failure(..., details=[])` 必须规范化为 `details=None`，序列化 JSON 不包含 `details`。
 
 ## 4. HTTP 状态码映射
 
@@ -75,6 +92,8 @@
 | `502` | 网关收到下游失败 | `50201`-`50203` |
 | `503` | 服务或依赖未就绪 | `50301`-`50303` |
 | `504` | 下游调用超时 | `50401` |
+
+标准 HTTP 异常必须保留原 HTTP 状态。上表中的已知状态映射到最接近的冻结业务码；其他 `4xx` 使用 `40001`，其他 `5xx` 使用 `50001`。异常响应只按不区分大小写的白名单透传 `Allow`、`WWW-Authenticate`、`Retry-After`，不得透传 Cookie、内部调试头或任意自定义头；异常 `detail` 不进入响应体。
 
 ## 5. 错误码目录
 
@@ -147,13 +166,42 @@
 | Header | 约定 |
 |---|---|
 | `Content-Type` | JSON 请求固定为 `application/json`。 |
-| `X-Trace-Id` | 网关接收或生成追踪 ID；下游沿用。 |
+| `X-Trace-Id` | 网关保留合法入站值，否则生成 `trace_` 前缀 ID；下游、响应头和响应体沿用同一个值。 |
 | `Idempotency-Key` | 创建批次、资产、授权、训练任务、聚合和存证等写操作建议传入。 |
 | `X-Caller-Did` | 服务间调用时传入调用方 DID；与请求体 DID 不一致时返回 `40102`。 |
 
 幂等规则：相同 Key 重试返回首次结果；相同 Key 但请求体不同返回 HTTP `409`、业务码 `40901`；超时后不得生成新 Key 造成重复业务。
 
-## 7. 健康检查
+### 6.1 `traceId` 冻结规则
+
+1. 合法值必须以 `trace_` 开头，只包含英文字母、数字、点、下划线、冒号或连字符，总长度不超过 128 个字符。
+2. `api-gateway` 收到合法的 `X-Trace-Id` 时原样保留；缺失或非法时生成新值。
+3. 网关调用所有下游时必须传递同一个 `X-Trace-Id`；业务服务不得为同一请求重新生成追踪 ID。
+4. 每个服务的响应头 `X-Trace-Id` 与响应体 `traceId` 必须相同，结构化日志也必须记录该值。
+5. `traceId` 只用于链路排查，不承载 DID、业务 ID、密钥、令牌或其他敏感内容。
+
+## 7. 统一 ID 前缀
+
+| 前缀 | 资源 |
+|---|---|
+| `demo_` | 一键演示业务 |
+| `batch_` | 电表读数批次 |
+| `reading_` | 单条电表读数 |
+| `asset_` | 数据资产 |
+| `auth_` | 授权申请 |
+| `fl_task_` | 联邦训练任务 |
+| `aggregate_` | 隐私聚合结果 |
+| `global_model_v` | 全局模型版本 |
+| `prediction_` | 预测结果 |
+| `strategy_` | 交易策略 |
+| `report_` | 审计报告 |
+| `evt_` | 存证事件 |
+| `tx_` | 存证交易 |
+| `trace_` | 链路追踪 |
+
+创建资源时统一调用 `vpp_common.new_id(prefix)`；未知前缀必须拒绝。ID 是不透明字符串，调用方不得依赖后缀长度、排序或数值连续性。
+
+## 8. 健康检查
 
 ```http
 GET /health
@@ -166,7 +214,8 @@ GET /health
   "code": 0,
   "message": "ok",
   "data": { "service": "service-name", "status": "healthy" },
-  "traceId": "trace_20260710_000001"
+  "traceId": "trace_20260710_000001",
+  "timestamp": "2026-07-10T02:00:00Z"
 }
 ```
 

@@ -1,2 +1,20 @@
-# Local agent planning and design records; do not publish them to the repository.
+# Ignore new local agent records; already tracked records remain versioned.
 docs/superpowers/
+.superpowers/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+
+# Python
+.venv/
+**/__pycache__/
+**/.pytest_cache/
+**/*.egg-info/
+.coverage
+htmlcov/
+
+# Frontend
+apps/web-dashboard/node_modules/
+apps/web-dashboard/dist/
