@@ -1,0 +1,985 @@
+# Review package: e227852d4aa9e92027aa19b5412e2d32ac59ba61..5fe5520614950aad6de7b92066bc659cacd5144b
+
+## Commits
+5fe5520 fix: normalize HTTP exceptions in common package
+44235b3 feat: add common package and repository baseline
+
+## Files changed
+ .editorconfig                                     |  18 ++++
+ .gitignore                                        |  18 ++++
+ .nvmrc                                            |   1 +
+ .python-version                                   |   1 +
+ README.md                                         |  25 +++++
+ docs/api/response-and-errors.md                   |  35 ++++++-
+ packages/common/README.md                         |  40 ++++++++
+ packages/common/pyproject.toml                    |  23 +++++
+ packages/common/src/vpp_common/__init__.py        |  18 ++++
+ packages/common/src/vpp_common/errors.py          |  92 +++++++++++++++++
+ packages/common/src/vpp_common/fastapi_support.py | 118 ++++++++++++++++++++++
+ packages/common/src/vpp_common/id_generator.py    |  29 ++++++
+ packages/common/src/vpp_common/response.py        |  53 ++++++++++
+ packages/common/src/vpp_common/schemas.py         |  15 +++
+ packages/common/src/vpp_common/time_utils.py      |   8 ++
+ packages/common/src/vpp_common/tracing.py         |  32 ++++++
+ packages/common/tests/test_fastapi_support.py     |  99 ++++++++++++++++++
+ packages/common/tests/test_ids.py                 |  41 ++++++++
+ packages/common/tests/test_response.py            |  89 ++++++++++++++++
+ packages/common/tests/test_tracing.py             |  25 +++++
+ 20 files changed, 777 insertions(+), 3 deletions(-)
+
+## Diff
+diff --git a/.editorconfig b/.editorconfig
+new file mode 100644
+index 0000000..464e895
+--- /dev/null
++++ b/.editorconfig
+@@ -0,0 +1,18 @@
++root = true
++
++[*]
++charset = utf-8
++end_of_line = lf
++insert_final_newline = true
++trim_trailing_whitespace = true
++
++[*.{py,toml,yml,yaml}]
++indent_style = space
++indent_size = 4
++
++[*.{js,json,vue}]
++indent_style = space
++indent_size = 2
++
++[*.md]
++trim_trailing_whitespace = false
+diff --git a/.gitignore b/.gitignore
+index 322486b..f298fcb 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -1,2 +1,20 @@
+ # Local agent planning and design records; do not publish them to the repository.
+ docs/superpowers/
++.superpowers/
++
++# Local configuration and secrets
++.env
++.env.*
++!.env.example
++
++# Python
++.venv/
++**/__pycache__/
++**/.pytest_cache/
++**/*.egg-info/
++.coverage
++htmlcov/
++
++# Frontend
++apps/web-dashboard/node_modules/
++apps/web-dashboard/dist/
+diff --git a/.nvmrc b/.nvmrc
+new file mode 100644
+index 0000000..a45fd52
+--- /dev/null
++++ b/.nvmrc
+@@ -0,0 +1 @@
++24
+diff --git a/.python-version b/.python-version
+new file mode 100644
+index 0000000..2c07333
+--- /dev/null
++++ b/.python-version
+@@ -0,0 +1 @@
++3.11
+diff --git a/README.md b/README.md
+index 52238fe..191b85a 100644
+--- a/README.md
++++ b/README.md
+@@ -1,14 +1,39 @@
+ ﻿# vpp-trusted-data-space
+ 
+ 面向虚拟电厂跨主体交易的可信数据空间协同计算与审计平台。
+ 
++## 第一周技术基线（已冻结）
++
++后端统一采用 Python 3.11、FastAPI、Pydantic v2、Uvicorn、httpx 和 pytest；服务间协议固定为 HTTP/1.1 + JSON。公共依赖范围为 FastAPI `>=0.115,<1`、Pydantic `>=2,<3`、httpx `>=0.28,<1`、pytest `>=8,<9`，各模块必须在自己的依赖文件中锁定直接依赖，不得自行替换后端框架。
++
++前端统一采用 Node.js 24 LTS、Vue 3、Vite、JavaScript、Element Plus 和 Axios；第一周不引入 TypeScript、Pinia 或 Nuxt。`.python-version` 和 `.nvmrc` 是本地运行时基线。
++
++所有源码、配置、文档和测试文件统一使用 UTF-8、LF 换行。Windows PowerShell 读取中文文档时必须显式指定编码，例如：
++
++```powershell
++Get-Content -Encoding UTF8 README.md
++```
++
++模块对外通信只使用 `docs/api/openapi.md` 中的 HTTP 接口；统一响应、错误码、`traceId` 与 ID 前缀以 `docs/api/response-and-errors.md` 和 `packages/common` 为准。
++
++## 公共包
++
++使用 Python 3.11 在仓库根目录安装：
++
++```powershell
++python -m pip install -e "packages/common[test]"
++python -m pytest packages/common/tests tests/integration/test_contract_docs.py -v
++```
++
++八个后端必须安装 `vpp-common==0.1.0` 的仓库内版本，不得在各模块复制响应、错误码、追踪或 ID 生成逻辑。模块专属 DTO 继续保留在各模块内部。
++
+ ## 项目主线
+ 
+ 源端可信采集 + 联邦学习 + 同态加密/MPC 安全聚合 + 区块链审计 + Agent 交易决策。
+ 
+ ## 目录结构
+ 
+ - `apps/web-dashboard`: 前端可视化平台
+ - `services/api-gateway`: 统一 API 网关
+ - `services/meter-simulator`: 智能电表与采集终端模拟
+ - `services/identity-did`: DID 主体身份与授权
+diff --git a/docs/api/response-and-errors.md b/docs/api/response-and-errors.md
+index 0a188e4..5b018da 100644
+--- a/docs/api/response-and-errors.md
++++ b/docs/api/response-and-errors.md
+@@ -1,17 +1,17 @@
+ # 公共响应格式与错误码
+ 
+ > **文档职责**：本文档是 vpp-trusted-data-space 全部 HTTP 服务的公共协议单一来源，定义统一响应包络、错误码、HTTP 状态码、追踪字段和幂等约定。`docs/api/openapi.md` 负责引用这些规则并描述具体接口；`docs/design/module-contracts.md` 负责描述模块职责和接口边界，不能另行定义冲突的响应格式或错误码。
+ 
+ ## 1. 适用范围
+ 
+-适用于 `api-gateway`、`meter-simulator`、`data-ingestion`、`identity-did`、`federated-learning`、`privacy-compute`、`ledger-service`、`ai-agent` 的所有业务接口和 `GET /health`。
++适用于 `api-gateway`、`meter-simulator`、`data-ingestion`、`identity-did`、`federated-learning`、`privacy-compute`、`ledger-service`、`ai-agent` 的所有业务接口和 `GET /health`。八个后端统一安装 `packages/common`，不得复制或自行修改响应、错误码、追踪和 ID 生成实现。
+ 
+ 接口路径、请求字段和模块边界以 `docs/api/openapi.md` 与 `docs/design/module-contracts.md` 为准；本文件只定义跨模块通用规则。
+ 
+ ## 2. 统一成功响应
+ 
+ 所有 HTTP 响应均使用以下包络：
+ 
+ ```json
+ {
+   "code": 0,
+@@ -140,27 +140,56 @@
+ | `50301` | `service unavailable` | 当前服务未就绪。 |
+ | `50302` | `dependency unavailable` | 依赖未就绪。 |
+ | `50303` | `maintenance mode` | 服务维护中。 |
+ | `50401` | `downstream timeout` | 下游响应超时。 |
+ 
+ ## 6. 请求头、幂等和追踪
+ 
+ | Header | 约定 |
+ |---|---|
+ | `Content-Type` | JSON 请求固定为 `application/json`。 |
+-| `X-Trace-Id` | 网关接收或生成追踪 ID；下游沿用。 |
++| `X-Trace-Id` | 网关保留合法入站值，否则生成 `trace_` 前缀 ID；下游、响应头和响应体沿用同一个值。 |
+ | `Idempotency-Key` | 创建批次、资产、授权、训练任务、聚合和存证等写操作建议传入。 |
+ | `X-Caller-Did` | 服务间调用时传入调用方 DID；与请求体 DID 不一致时返回 `40102`。 |
+ 
+ 幂等规则：相同 Key 重试返回首次结果；相同 Key 但请求体不同返回 HTTP `409`、业务码 `40901`；超时后不得生成新 Key 造成重复业务。
+ 
+-## 7. 健康检查
++### 6.1 `traceId` 冻结规则
++
++1. 合法值必须以 `trace_` 开头，只包含英文字母、数字、点、下划线、冒号或连字符，总长度不超过 128 个字符。
++2. `api-gateway` 收到合法的 `X-Trace-Id` 时原样保留；缺失或非法时生成新值。
++3. 网关调用所有下游时必须传递同一个 `X-Trace-Id`；业务服务不得为同一请求重新生成追踪 ID。
++4. 每个服务的响应头 `X-Trace-Id` 与响应体 `traceId` 必须相同，结构化日志也必须记录该值。
++5. `traceId` 只用于链路排查，不承载 DID、业务 ID、密钥、令牌或其他敏感内容。
++
++## 7. 统一 ID 前缀
++
++| 前缀 | 资源 |
++|---|---|
++| `demo_` | 一键演示业务 |
++| `batch_` | 电表读数批次 |
++| `reading_` | 单条电表读数 |
++| `asset_` | 数据资产 |
++| `auth_` | 授权申请 |
++| `fl_task_` | 联邦训练任务 |
++| `aggregate_` | 隐私聚合结果 |
++| `global_model_v` | 全局模型版本 |
++| `prediction_` | 预测结果 |
++| `strategy_` | 交易策略 |
++| `report_` | 审计报告 |
++| `evt_` | 存证事件 |
++| `tx_` | 存证交易 |
++| `trace_` | 链路追踪 |
++
++创建资源时统一调用 `vpp_common.new_id(prefix)`；未知前缀必须拒绝。ID 是不透明字符串，调用方不得依赖后缀长度、排序或数值连续性。
++
++## 8. 健康检查
+ 
+ ```http
+ GET /health
+ ```
+ 
+ 健康时返回 HTTP `200`：
+ 
+ ```json
+ {
+   "code": 0,
+diff --git a/packages/common/README.md b/packages/common/README.md
+new file mode 100644
+index 0000000..503aa6e
+--- /dev/null
++++ b/packages/common/README.md
+@@ -0,0 +1,40 @@
++# vpp-common
++
++`vpp-common` 是八个 FastAPI 后端共享的最小公共包，版本冻结为 `0.1.0`。它只提供统一响应、错误码、异常处理、`traceId`、业务 ID、UTC 时间和跨模块基础 Schema。
++
++## 安装
++
++在仓库根目录使用 Python 3.11：
++
++```powershell
++python -m pip install -e "packages/common[test]"
++```
++
++业务服务必须依赖此包，不得复制响应或错误码实现。模块专属 DTO、数据库模型、环境配置和业务逻辑不得放入公共包。
++
++## 使用
++
++```python
++from fastapi import FastAPI
++from vpp_common import install_exception_handlers, new_id, success
++
++app = FastAPI()
++install_exception_handlers(app)
++
++
++@app.get("/health")
++def health():
++    return success({"service": "example", "status": "healthy"})
++
++
++asset_id = new_id("asset_")
++```
++
++`install_exception_handlers()` 同时安装追踪中间件：读取或生成 `X-Trace-Id`，在当前请求的响应体、响应头及下游调用中复用同一个值。
++
++## 公共 API 冻结规则
++
++- 当前公共 API 版本：`0.1.0`。
++- 接口变更必须先更新正式契约文档并由技术负责人批准。
++- 只允许向后兼容的阻塞修复进入第一周公共包。
++- 错误码与 ID 前缀分别以 `docs/api/response-and-errors.md` 和本包常量为准。
+diff --git a/packages/common/pyproject.toml b/packages/common/pyproject.toml
+new file mode 100644
+index 0000000..e7bebab
+--- /dev/null
++++ b/packages/common/pyproject.toml
+@@ -0,0 +1,23 @@
++[build-system]
++requires = ["setuptools>=75"]
++build-backend = "setuptools.build_meta"
++
++[project]
++name = "vpp-common"
++version = "0.1.0"
++description = "Cross-service response, error, tracing, ID, and base schema utilities."
++readme = "README.md"
++requires-python = ">=3.11,<3.12"
++dependencies = [
++  "fastapi>=0.115,<1",
++  "pydantic>=2,<3",
++]
++
++[project.optional-dependencies]
++test = [
++  "httpx>=0.28,<1",
++  "pytest>=8,<9",
++]
++
++[tool.setuptools.packages.find]
++where = ["src"]
+diff --git a/packages/common/src/vpp_common/__init__.py b/packages/common/src/vpp_common/__init__.py
+new file mode 100644
+index 0000000..d74ae8c
+--- /dev/null
++++ b/packages/common/src/vpp_common/__init__.py
+@@ -0,0 +1,18 @@
++from .errors import ErrorCode
++from .fastapi_support import ServiceError, install_exception_handlers
++from .id_generator import new_id
++from .response import ApiResponse, failure, success
++from .time_utils import utc_now_iso
++from .tracing import resolve_trace_id
++
++__all__ = [
++    "ApiResponse",
++    "ErrorCode",
++    "ServiceError",
++    "failure",
++    "install_exception_handlers",
++    "new_id",
++    "resolve_trace_id",
++    "success",
++    "utc_now_iso",
++]
+diff --git a/packages/common/src/vpp_common/errors.py b/packages/common/src/vpp_common/errors.py
+new file mode 100644
+index 0000000..0b88ac7
+--- /dev/null
++++ b/packages/common/src/vpp_common/errors.py
+@@ -0,0 +1,92 @@
++from enum import IntEnum
++
++
++class ErrorCode(IntEnum):
++    INVALID_REQUEST = 40001
++    MISSING_REQUIRED_FIELD = 40002
++    INVALID_TIMESTAMP = 40003
++    INVALID_ENUM_VALUE = 40004
++    PAYLOAD_TOO_LARGE = 40005
++
++    MISSING_IDENTITY = 40101
++    INVALID_DID = 40102
++    INVALID_SIGNATURE = 40103
++    INVALID_HASH = 40104
++
++    ACCESS_DENIED = 40301
++    AUTHORIZATION_REQUIRED = 40302
++    AUTHORIZATION_EXPIRED = 40303
++
++    RESOURCE_NOT_FOUND = 40401
++    BUSINESS_NOT_FOUND = 40402
++    TRAINING_TASK_NOT_FOUND = 40403
++    MODEL_VERSION_NOT_FOUND = 40404
++
++    IDEMPOTENCY_CONFLICT = 40901
++    INVALID_RESOURCE_STATE = 40902
++    DUPLICATE_EVENT = 40903
++
++    PARTICIPANTS_NOT_READY = 42201
++    INSUFFICIENT_UPDATES = 42202
++    UNSUPPORTED_PRIVACY_MODE = 42203
++    INVALID_TRAINING_CONFIGURATION = 42204
++
++    RATE_LIMIT_EXCEEDED = 42901
++
++    INTERNAL_ERROR = 50001
++    STORAGE_ERROR = 50002
++    SERIALIZATION_ERROR = 50003
++
++    DOWNSTREAM_REJECTED = 50201
++    DOWNSTREAM_INVALID_RESPONSE = 50202
++    DOWNSTREAM_UNAVAILABLE = 50203
++
++    SERVICE_UNAVAILABLE = 50301
++    DEPENDENCY_UNAVAILABLE = 50302
++    MAINTENANCE_MODE = 50303
++
++    DOWNSTREAM_TIMEOUT = 50401
++
++
++ERROR_MESSAGES: dict[ErrorCode, str] = {
++    ErrorCode.INVALID_REQUEST: "invalid request",
++    ErrorCode.MISSING_REQUIRED_FIELD: "missing required field",
++    ErrorCode.INVALID_TIMESTAMP: "invalid timestamp",
++    ErrorCode.INVALID_ENUM_VALUE: "invalid enum value",
++    ErrorCode.PAYLOAD_TOO_LARGE: "payload too large",
++    ErrorCode.MISSING_IDENTITY: "missing identity",
++    ErrorCode.INVALID_DID: "invalid did",
++    ErrorCode.INVALID_SIGNATURE: "invalid signature",
++    ErrorCode.INVALID_HASH: "invalid hash",
++    ErrorCode.ACCESS_DENIED: "access denied",
++    ErrorCode.AUTHORIZATION_REQUIRED: "authorization required",
++    ErrorCode.AUTHORIZATION_EXPIRED: "authorization expired",
++    ErrorCode.RESOURCE_NOT_FOUND: "resource not found",
++    ErrorCode.BUSINESS_NOT_FOUND: "business not found",
++    ErrorCode.TRAINING_TASK_NOT_FOUND: "training task not found",
++    ErrorCode.MODEL_VERSION_NOT_FOUND: "model version not found",
++    ErrorCode.IDEMPOTENCY_CONFLICT: "idempotency conflict",
++    ErrorCode.INVALID_RESOURCE_STATE: "invalid resource state",
++    ErrorCode.DUPLICATE_EVENT: "duplicate event",
++    ErrorCode.PARTICIPANTS_NOT_READY: "participants not ready",
++    ErrorCode.INSUFFICIENT_UPDATES: "insufficient updates",
++    ErrorCode.UNSUPPORTED_PRIVACY_MODE: "unsupported privacy mode",
++    ErrorCode.INVALID_TRAINING_CONFIGURATION: "invalid training configuration",
++    ErrorCode.RATE_LIMIT_EXCEEDED: "rate limit exceeded",
++    ErrorCode.INTERNAL_ERROR: "internal error",
++    ErrorCode.STORAGE_ERROR: "storage error",
++    ErrorCode.SERIALIZATION_ERROR: "serialization error",
++    ErrorCode.DOWNSTREAM_REJECTED: "downstream rejected",
++    ErrorCode.DOWNSTREAM_INVALID_RESPONSE: "downstream invalid response",
++    ErrorCode.DOWNSTREAM_UNAVAILABLE: "downstream unavailable",
++    ErrorCode.SERVICE_UNAVAILABLE: "service unavailable",
++    ErrorCode.DEPENDENCY_UNAVAILABLE: "dependency unavailable",
++    ErrorCode.MAINTENANCE_MODE: "maintenance mode",
++    ErrorCode.DOWNSTREAM_TIMEOUT: "downstream timeout",
++}
++
++
++def http_status_for(code: ErrorCode | int) -> int:
++    error_code = ErrorCode(code)
++    status = int(error_code) // 100
++    return status if status in {400, 401, 403, 404, 409, 422, 429, 500, 502, 503, 504} else 500
+diff --git a/packages/common/src/vpp_common/fastapi_support.py b/packages/common/src/vpp_common/fastapi_support.py
+new file mode 100644
+index 0000000..1a51313
+--- /dev/null
++++ b/packages/common/src/vpp_common/fastapi_support.py
+@@ -0,0 +1,118 @@
++from collections.abc import Sequence
++
++from fastapi import FastAPI, Request
++from fastapi.exceptions import RequestValidationError
++from fastapi.responses import JSONResponse
++from starlette.exceptions import HTTPException as StarletteHTTPException
++
++from .errors import ERROR_MESSAGES, ErrorCode, http_status_for
++from .response import failure
++from .schemas import ErrorDetail
++from .tracing import (
++    TRACE_HEADER,
++    reset_current_trace_id,
++    resolve_trace_id,
++    set_current_trace_id,
++)
++
++
++_HTTP_STATUS_ERROR_CODES: dict[int, ErrorCode] = {
++    400: ErrorCode.INVALID_REQUEST,
++    401: ErrorCode.MISSING_IDENTITY,
++    403: ErrorCode.ACCESS_DENIED,
++    404: ErrorCode.RESOURCE_NOT_FOUND,
++    409: ErrorCode.IDEMPOTENCY_CONFLICT,
++    422: ErrorCode.PARTICIPANTS_NOT_READY,
++    429: ErrorCode.RATE_LIMIT_EXCEEDED,
++    500: ErrorCode.INTERNAL_ERROR,
++    502: ErrorCode.DOWNSTREAM_REJECTED,
++    503: ErrorCode.SERVICE_UNAVAILABLE,
++    504: ErrorCode.DOWNSTREAM_TIMEOUT,
++}
++
++
++class ServiceError(Exception):
++    def __init__(
++        self,
++        code: ErrorCode | int,
++        *,
++        message: str | None = None,
++        details: Sequence[ErrorDetail] | None = None,
++    ) -> None:
++        self.code = ErrorCode(code)
++        self.message = message or ERROR_MESSAGES[self.code]
++        self.details = list(details) if details else None
++        super().__init__(self.message)
++
++
++def _json_error(
++    code: ErrorCode,
++    trace_id: str,
++    *,
++    message: str | None = None,
++    details: list[ErrorDetail] | None = None,
++) -> JSONResponse:
++    body = failure(
++        code,
++        trace_id=trace_id,
++        message=message,
++        details=details,
++    )
++    return JSONResponse(
++        status_code=http_status_for(code),
++        content=body.model_dump(exclude={"details"} if details is None else set()),
++        headers={TRACE_HEADER: trace_id},
++    )
++
++
++def install_exception_handlers(app: FastAPI) -> None:
++    """Install the frozen trace middleware and unified exception handlers."""
++
++    @app.middleware("http")
++    async def trace_middleware(request: Request, call_next):
++        trace_id = resolve_trace_id(request.headers.get(TRACE_HEADER))
++        request.state.trace_id = trace_id
++        token = set_current_trace_id(trace_id)
++        try:
++            response = await call_next(request)
++            response.headers[TRACE_HEADER] = trace_id
++            return response
++        finally:
++            reset_current_trace_id(token)
++
++    @app.exception_handler(ServiceError)
++    async def service_error_handler(request: Request, exc: ServiceError):
++        return _json_error(
++            exc.code,
++            request.state.trace_id,
++            message=exc.message,
++            details=exc.details,
++        )
++
++    @app.exception_handler(RequestValidationError)
++    async def validation_error_handler(request: Request, exc: RequestValidationError):
++        details = [
++            ErrorDetail(
++                field=".".join(str(item) for item in error["loc"] if item != "body"),
++                reason=error["msg"],
++            )
++            for error in exc.errors()
++        ]
++        return _json_error(
++            ErrorCode.INVALID_REQUEST,
++            request.state.trace_id,
++            details=details,
++        )
++
++    @app.exception_handler(StarletteHTTPException)
++    async def http_exception_handler(
++        request: Request, exc: StarletteHTTPException
++    ):
++        code = _HTTP_STATUS_ERROR_CODES.get(
++            exc.status_code, ErrorCode.INTERNAL_ERROR
++        )
++        return _json_error(code, request.state.trace_id)
++
++    @app.exception_handler(Exception)
++    async def internal_error_handler(request: Request, exc: Exception):
++        return _json_error(ErrorCode.INTERNAL_ERROR, request.state.trace_id)
+diff --git a/packages/common/src/vpp_common/id_generator.py b/packages/common/src/vpp_common/id_generator.py
+new file mode 100644
+index 0000000..dcdb35e
+--- /dev/null
++++ b/packages/common/src/vpp_common/id_generator.py
+@@ -0,0 +1,29 @@
++from secrets import token_hex
++
++
++ALLOWED_ID_PREFIXES = frozenset(
++    {
++        "demo_",
++        "batch_",
++        "reading_",
++        "asset_",
++        "auth_",
++        "fl_task_",
++        "aggregate_",
++        "global_model_v",
++        "prediction_",
++        "strategy_",
++        "report_",
++        "evt_",
++        "tx_",
++        "trace_",
++    }
++)
++
++
++def new_id(prefix: str) -> str:
++    """Generate a unique opaque ID with one of the frozen cross-module prefixes."""
++    if prefix not in ALLOWED_ID_PREFIXES:
++        allowed = ", ".join(sorted(ALLOWED_ID_PREFIXES))
++        raise ValueError(f"unsupported ID prefix {prefix!r}; allowed prefixes: {allowed}")
++    return f"{prefix}{token_hex(8)}"
+diff --git a/packages/common/src/vpp_common/response.py b/packages/common/src/vpp_common/response.py
+new file mode 100644
+index 0000000..e00fb6d
+--- /dev/null
++++ b/packages/common/src/vpp_common/response.py
+@@ -0,0 +1,53 @@
++from typing import Generic, TypeVar
++
++from pydantic import BaseModel, ConfigDict, Field
++
++from .errors import ERROR_MESSAGES, ErrorCode
++from .schemas import ErrorDetail
++from .time_utils import utc_now_iso
++from .tracing import resolve_trace_id
++
++
++T = TypeVar("T")
++
++
++class ApiResponse(BaseModel, Generic[T]):
++    model_config = ConfigDict(extra="forbid")
++
++    code: int
++    message: str
++    data: T | None
++    traceId: str
++    timestamp: str = Field(default_factory=utc_now_iso)
++    details: list[ErrorDetail] | None = None
++
++
++def success(
++    data: T | None = None,
++    *,
++    trace_id: str | None = None,
++    message: str = "ok",
++) -> ApiResponse[T]:
++    return ApiResponse(
++        code=0,
++        message=message,
++        data=data,
++        traceId=resolve_trace_id(trace_id),
++    )
++
++
++def failure(
++    code: ErrorCode | int,
++    *,
++    trace_id: str | None = None,
++    message: str | None = None,
++    details: list[ErrorDetail] | None = None,
++) -> ApiResponse[None]:
++    error_code = ErrorCode(code)
++    return ApiResponse(
++        code=int(error_code),
++        message=message or ERROR_MESSAGES[error_code],
++        data=None,
++        traceId=resolve_trace_id(trace_id),
++        details=details,
++    )
+diff --git a/packages/common/src/vpp_common/schemas.py b/packages/common/src/vpp_common/schemas.py
+new file mode 100644
+index 0000000..d3a2955
+--- /dev/null
++++ b/packages/common/src/vpp_common/schemas.py
+@@ -0,0 +1,15 @@
++from pydantic import BaseModel, ConfigDict
++
++
++class CommonSchema(BaseModel):
++    model_config = ConfigDict(extra="forbid")
++
++
++class HealthData(CommonSchema):
++    service: str
++    status: str
++
++
++class ErrorDetail(CommonSchema):
++    field: str
++    reason: str
+diff --git a/packages/common/src/vpp_common/time_utils.py b/packages/common/src/vpp_common/time_utils.py
+new file mode 100644
+index 0000000..90a02b7
+--- /dev/null
++++ b/packages/common/src/vpp_common/time_utils.py
+@@ -0,0 +1,8 @@
++from datetime import datetime, timezone
++
++
++def utc_now_iso() -> str:
++    """Return a timezone-aware ISO 8601 timestamp in UTC."""
++    return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace(
++        "+00:00", "Z"
++    )
+diff --git a/packages/common/src/vpp_common/tracing.py b/packages/common/src/vpp_common/tracing.py
+new file mode 100644
+index 0000000..126ff04
+--- /dev/null
++++ b/packages/common/src/vpp_common/tracing.py
+@@ -0,0 +1,32 @@
++import re
++from contextvars import ContextVar, Token
++
++from .id_generator import new_id
++
++
++TRACE_HEADER = "X-Trace-Id"
++MAX_TRACE_ID_LENGTH = 128
++_TRACE_PATTERN = re.compile(r"^trace_[A-Za-z0-9._:-]*$")
++_current_trace_id: ContextVar[str | None] = ContextVar(
++    "vpp_trace_id", default=None
++)
++
++
++def _is_valid_trace_id(value: str) -> bool:
++    return len(value) <= MAX_TRACE_ID_LENGTH and _TRACE_PATTERN.fullmatch(value) is not None
++
++
++def resolve_trace_id(incoming: str | None = None) -> str:
++    """Preserve a valid incoming trace ID or generate a safe replacement."""
++    candidate = incoming or _current_trace_id.get()
++    if candidate and _is_valid_trace_id(candidate):
++        return candidate
++    return new_id("trace_")
++
++
++def set_current_trace_id(trace_id: str) -> Token[str | None]:
++    return _current_trace_id.set(trace_id)
++
++
++def reset_current_trace_id(token: Token[str | None]) -> None:
++    _current_trace_id.reset(token)
+diff --git a/packages/common/tests/test_fastapi_support.py b/packages/common/tests/test_fastapi_support.py
+new file mode 100644
+index 0000000..6b7061f
+--- /dev/null
++++ b/packages/common/tests/test_fastapi_support.py
+@@ -0,0 +1,99 @@
++from fastapi import FastAPI, HTTPException
++from fastapi.testclient import TestClient
++from pydantic import BaseModel
++
++from vpp_common.errors import ErrorCode
++from vpp_common.fastapi_support import ServiceError, install_exception_handlers
++from vpp_common.response import success
++from vpp_common.schemas import ErrorDetail
++
++
++class Payload(BaseModel):
++    value: int
++
++
++def build_app() -> FastAPI:
++    app = FastAPI()
++    install_exception_handlers(app)
++
++    @app.get("/ok")
++    def ok():
++        return success({"status": "ready"})
++
++    @app.get("/service-error")
++    def service_error():
++        raise ServiceError(
++            ErrorCode.RESOURCE_NOT_FOUND,
++            details=[ErrorDetail(field="assetId", reason="not found")],
++        )
++
++    @app.post("/validation-error")
++    def validation_error(payload: Payload):
++        return success(payload.model_dump())
++
++    @app.get("/internal-error")
++    def internal_error():
++        raise RuntimeError("secret implementation detail")
++
++    @app.get("/http-not-found")
++    def http_not_found():
++        raise HTTPException(status_code=404, detail="secret HTTP exception detail")
++
++    return app
++
++
++def test_trace_id_is_preserved_in_body_and_header():
++    client = TestClient(build_app())
++    response = client.get("/ok", headers={"X-Trace-Id": "trace_existing"})
++
++    assert response.status_code == 200
++    assert response.json()["traceId"] == "trace_existing"
++    assert response.headers["X-Trace-Id"] == "trace_existing"
++
++
++def test_service_error_uses_unified_envelope():
++    client = TestClient(build_app())
++    response = client.get("/service-error")
++
++    assert response.status_code == 404
++    assert response.json()["code"] == 40401
++    assert response.json()["data"] is None
++    assert response.json()["details"] == [
++        {"field": "assetId", "reason": "not found"}
++    ]
++    assert response.json()["traceId"].startswith("trace_")
++
++
++def test_validation_error_is_normalized():
++    client = TestClient(build_app())
++    response = client.post("/validation-error", json={"value": "wrong"})
++
++    assert response.status_code == 400
++    assert response.json()["code"] == 40001
++    assert response.json()["message"] == "invalid request"
++    assert response.json()["details"]
++
++
++def test_internal_error_does_not_leak_exception_message():
++    client = TestClient(build_app(), raise_server_exceptions=False)
++    response = client.get("/internal-error")
++
++    assert response.status_code == 500
++    assert response.json()["code"] == 50001
++    assert response.json()["message"] == "internal error"
++    assert "secret implementation detail" not in response.text
++
++
++def test_http_not_found_is_normalized_without_detail_leakage():
++    client = TestClient(build_app())
++    response = client.get(
++        "/http-not-found", headers={"X-Trace-Id": "trace_existing"}
++    )
++
++    assert response.status_code == 404
++    assert response.json()["code"] == 40401
++    assert response.json()["data"] is None
++    assert response.json()["traceId"] == "trace_existing"
++    assert response.headers["X-Trace-Id"] == "trace_existing"
++    assert "detail" not in response.json()
++    assert "secret HTTP exception detail" not in response.text
+diff --git a/packages/common/tests/test_ids.py b/packages/common/tests/test_ids.py
+new file mode 100644
+index 0000000..1f2ff12
+--- /dev/null
++++ b/packages/common/tests/test_ids.py
+@@ -0,0 +1,41 @@
++import pytest
++
++from vpp_common.id_generator import ALLOWED_ID_PREFIXES, new_id
++
++
++EXPECTED_PREFIXES = {
++    "demo_",
++    "batch_",
++    "reading_",
++    "asset_",
++    "auth_",
++    "fl_task_",
++    "aggregate_",
++    "global_model_v",
++    "prediction_",
++    "strategy_",
++    "report_",
++    "evt_",
++    "tx_",
++    "trace_",
++}
++
++
++def test_frozen_id_prefixes_are_complete():
++    assert ALLOWED_ID_PREFIXES == frozenset(EXPECTED_PREFIXES)
++
++
++@pytest.mark.parametrize("prefix", sorted(EXPECTED_PREFIXES))
++def test_new_ids_use_requested_prefix(prefix):
++    generated = new_id(prefix)
++    assert generated.startswith(prefix)
++    assert len(generated) > len(prefix)
++
++
++def test_new_ids_are_unique():
++    assert new_id("asset_") != new_id("asset_")
++
++
++def test_unknown_id_prefix_is_rejected():
++    with pytest.raises(ValueError, match="unsupported ID prefix"):
++        new_id("unknown_")
+diff --git a/packages/common/tests/test_response.py b/packages/common/tests/test_response.py
+new file mode 100644
+index 0000000..d3ceedc
+--- /dev/null
++++ b/packages/common/tests/test_response.py
+@@ -0,0 +1,89 @@
++from datetime import datetime
++
++from vpp_common.errors import ERROR_MESSAGES, ErrorCode, http_status_for
++from vpp_common.response import failure, success
++from vpp_common.schemas import ErrorDetail
++
++
++EXPECTED_ERROR_CODES = {
++    40001,
++    40002,
++    40003,
++    40004,
++    40005,
++    40101,
++    40102,
++    40103,
++    40104,
++    40301,
++    40302,
++    40303,
++    40401,
++    40402,
++    40403,
++    40404,
++    40901,
++    40902,
++    40903,
++    42201,
++    42202,
++    42203,
++    42204,
++    42901,
++    50001,
++    50002,
++    50003,
++    50201,
++    50202,
++    50203,
++    50301,
++    50302,
++    50303,
++    50401,
++}
++
++
++def test_success_builds_unified_envelope():
++    response = success({"assetId": "asset_001"}, trace_id="trace_existing")
++
++    assert response.code == 0
++    assert response.message == "ok"
++    assert response.data == {"assetId": "asset_001"}
++    assert response.traceId == "trace_existing"
++    assert response.details is None
++    assert datetime.fromisoformat(response.timestamp.replace("Z", "+00:00")).tzinfo is not None
++
++
++def test_failure_uses_catalog_message_and_details():
++    response = failure(
++        ErrorCode.INVALID_REQUEST,
++        trace_id="trace_existing",
++        details=[ErrorDetail(field="participants", reason="must not be empty")],
++    )
++
++    assert response.code == 40001
++    assert response.message == "invalid request"
++    assert response.data is None
++    assert response.traceId == "trace_existing"
++    assert response.details == [
++        ErrorDetail(field="participants", reason="must not be empty")
++    ]
++
++
++def test_error_catalog_matches_frozen_document():
++    assert {int(code) for code in ErrorCode} == EXPECTED_ERROR_CODES
++    assert set(ERROR_MESSAGES) == {ErrorCode(value) for value in EXPECTED_ERROR_CODES}
++
++
++def test_error_code_prefix_maps_to_http_status():
++    assert http_status_for(ErrorCode.INVALID_REQUEST) == 400
++    assert http_status_for(ErrorCode.INVALID_DID) == 401
++    assert http_status_for(ErrorCode.ACCESS_DENIED) == 403
++    assert http_status_for(ErrorCode.RESOURCE_NOT_FOUND) == 404
++    assert http_status_for(ErrorCode.IDEMPOTENCY_CONFLICT) == 409
++    assert http_status_for(ErrorCode.INSUFFICIENT_UPDATES) == 422
++    assert http_status_for(ErrorCode.RATE_LIMIT_EXCEEDED) == 429
++    assert http_status_for(ErrorCode.INTERNAL_ERROR) == 500
++    assert http_status_for(ErrorCode.DOWNSTREAM_UNAVAILABLE) == 502
++    assert http_status_for(ErrorCode.SERVICE_UNAVAILABLE) == 503
++    assert http_status_for(ErrorCode.DOWNSTREAM_TIMEOUT) == 504
+diff --git a/packages/common/tests/test_tracing.py b/packages/common/tests/test_tracing.py
+new file mode 100644
+index 0000000..7a9cb86
+--- /dev/null
++++ b/packages/common/tests/test_tracing.py
+@@ -0,0 +1,25 @@
++from vpp_common.tracing import TRACE_HEADER, resolve_trace_id
++
++
++def test_trace_header_name_is_frozen():
++    assert TRACE_HEADER == "X-Trace-Id"
++
++
++def test_resolve_trace_id_preserves_valid_incoming():
++    assert resolve_trace_id("trace_existing") == "trace_existing"
++
++
++def test_resolve_trace_id_preserves_prefix_only_value():
++    assert resolve_trace_id("trace_") == "trace_"
++
++
++def test_resolve_trace_id_generates_when_missing():
++    generated = resolve_trace_id(None)
++    assert generated.startswith("trace_")
++    assert len(generated) > len("trace_")
++
++
++def test_resolve_trace_id_replaces_invalid_incoming():
++    assert resolve_trace_id("contains spaces").startswith("trace_")
++    assert resolve_trace_id("not-trace-prefixed").startswith("trace_")
++    assert resolve_trace_id("trace_" + "x" * 128).startswith("trace_")
