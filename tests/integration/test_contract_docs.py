@@ -227,6 +227,7 @@ def test_openapi_coverage_matrix_matches_each_backend_external_interface():
 
     assert matrix_modules == expected_modules
     assert len(matrix_rows) == len(set(matrix_rows))
+    assert all(method in STANDARD_HTTP_METHODS for _, method, _ in matrix_rows)
     assert {
         (method, path)
         for module, method, path in matrix_rows
@@ -246,6 +247,7 @@ def test_openapi_coverage_matrix_matches_each_backend_external_interface():
     for module, section in module_sections.items():
         external_rows = parse_http_endpoints(external_interface_http_block(section))
         assert len(external_rows) == len(set(external_rows))
+        assert all(method in STANDARD_HTTP_METHODS for method, _ in external_rows)
         assert set(external_rows) == {
             (method, path)
             for matrix_module, method, path in matrix_rows
