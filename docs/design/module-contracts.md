@@ -11,53 +11,15 @@
 核心原则：
 
 1. 前端只调用 `api-gateway`，不直接调用各业务模块。
-2. 完整业务流程由 `api-gateway` 统一编排。
+2. 第一周仅 `api-gateway` 负责跨模块编排和调用 `ledger-service`；其他业务模块不得直接调用 `ledger-service`。
 3. 每个模块只负责自己的能力边界，对外暴露固定 HTTP API。
 4. 每个模块必须提供 `GET /health` 健康检查接口。
-5. 所有接口返回统一格式：`{ code, message, data }`。
+5. 统一响应、错误码、追踪和幂等规则只引用 [`docs/api/response-and-errors.md`](../api/response-and-errors.md)。
 6. 关键操作由 `api-gateway` 调用 `ledger-service` 进行存证。
 7. 第一阶段先实现 Mock 版本跑通链路，再逐步替换真实算法。
 8. 任何接口字段修改，必须先更新 `docs/api/openapi.md` 并经技术负责人确认。
 
-统一响应格式（完整规则见 [`docs/api/response-and-errors.md`](../api/response-and-errors.md)）：
-
-```json
-{
-  "code": 0,
-  "message": "ok",
-  "data": {},
-  "traceId": "trace_20260710_000001"
-}
-```
-
-统一错误格式（完整错误码见 [`docs/api/response-and-errors.md`](../api/response-and-errors.md)）：
-
-```json
-{
-  "code": 40103,
-  "message": "invalid signature",
-  "data": null,
-  "traceId": "trace_20260710_000001"
-}
-```
-
-统一健康检查：
-
-```http
-GET /health
-```
-
-```json
-{
-  "code": 0,
-  "message": "ok",
-  "data": {
-    "service": "service-name",
-    "status": "healthy"
-  },
-  "traceId": "trace_20260710_000001"
-}
-```
+统一响应、错误码、追踪、幂等和健康检查规则均以 [`docs/api/response-and-errors.md`](../api/response-and-errors.md) 为准；各模块仅列出自身对外接口和业务字段。
 
 ## 2. 模块总览
 
@@ -68,7 +30,7 @@ GET /health
 | 2 | 安全传输与数据接入模块 | `services/data-ingestion` | 接收密文数据、验签、登记数据资产 | `api-gateway` |
 | 3 | DID 与授权模块 | `services/identity-did` | 主体身份、设备身份、授权申请与审批 | `api-gateway` |
 | 4 | 联邦学习模块 | `services/federated-learning` | 真实轻量本地训练、模型参数上传、FedAvg 聚合、模型版本与指标管理 | `api-gateway` |
-| 5 | 隐私计算模块 | `services/privacy-compute` | 同态加密参数保护、MPC/安全掩码聚合、参数摘要 | `api-gateway` / `federated-learning` |
+| 5 | 隐私计算模块 | `services/privacy-compute` | 同态加密参数保护、MPC/安全掩码聚合、参数摘要 | `api-gateway` |
 | 6 | 区块链存证模块 | `services/ledger-service` | 关键操作、数据哈希、模型版本、Agent 调用存证 | `api-gateway` |
 | 7 | Agent 业务模块 | `services/ai-agent` | 预测、交易策略、审计问答、报告生成 | `api-gateway` |
 | 8 | 前端展示模块 | `apps/web-dashboard` | 系统可视化、链路展示、报告展示 | 用户 / `api-gateway` |
@@ -76,25 +38,25 @@ GET /health
 
 ## 3. 完整业务链路
 
-主流程为：
+第一周的所有跨模块箭头均由 `api-gateway` 发起；业务模块只处理网关传入的请求并将结果返回网关。主流程为：
 
 ```text
 前端点击“开始演示”
   -> api-gateway 接收请求
-  -> meter-simulator 生成电表数据、加密、签名、哈希
-  -> ledger-service 记录数据哈希存证
-  -> identity-did 校验设备 DID 与主体 DID
-  -> data-ingestion 接收密文数据并登记数据资产
-  -> identity-did 创建并审批授权申请
-  -> ledger-service 记录授权存证
-  -> federated-learning 启动本地训练并生成模型参数
-  -> ledger-service 记录训练轮次存证
-  -> privacy-compute 对参数进行同态加密/安全掩码/MPC 安全聚合
-  -> ledger-service 记录参数摘要和聚合结果存证
-  -> federated-learning 执行 FedAvg 并生成 global_model_vN
-  -> ledger-service 记录模型版本存证
-  -> ai-agent 调用最新模型生成预测、交易策略、审计报告
-  -> ledger-service 记录 Agent 调用存证
+  -> api-gateway 调用 meter-simulator 生成电表数据、加密、签名、哈希
+  -> api-gateway 调用 ledger-service 记录数据哈希存证
+  -> api-gateway 调用 identity-did 校验设备 DID 与主体 DID
+  -> api-gateway 调用 data-ingestion 接收密文数据并登记数据资产
+  -> api-gateway 调用 identity-did 创建并审批授权申请
+  -> api-gateway 调用 ledger-service 记录授权存证
+  -> api-gateway 调用 federated-learning 启动本地训练并生成模型参数
+  -> api-gateway 调用 ledger-service 记录训练轮次存证
+  -> api-gateway 调用 privacy-compute 对参数进行同态加密/安全掩码/MPC 安全聚合
+  -> api-gateway 调用 ledger-service 记录参数摘要和聚合结果存证
+  -> api-gateway 调用 federated-learning 执行 FedAvg 并生成 global_model_vN
+  -> api-gateway 调用 ledger-service 记录模型版本存证
+  -> api-gateway 向 ai-agent 提供模型与账本证据引用，生成预测、交易策略、审计报告
+  -> api-gateway 调用 ledger-service 记录 Agent 调用存证
   -> api-gateway 汇总结果返回前端
 ```
 
@@ -111,11 +73,15 @@ POST /api/v1/demo/run
   "code": 0,
   "message": "demo finished",
   "data": {
+    "businessId": "demo_001",
     "readingBatchId": "batch_001",
     "assetId": "asset_001",
     "authId": "auth_001",
     "trainingTaskId": "fl_task_001",
     "globalModelVersion": "global_model_v1",
+    "metrics": { "mae": 2.31, "rmse": 3.72, "mape": 0.081 },
+    "predictionId": "prediction_001",
+    "strategyId": "strategy_001",
     "auditReportId": "report_001",
     "ledgerTxIds": [
       "tx_data_hash_001",
@@ -125,7 +91,8 @@ POST /api/v1/demo/run
       "tx_model_001",
       "tx_agent_001"
     ]
-  }
+  },
+  "traceId": "trace_20260710_000001"
 }
 ```
 
@@ -203,6 +170,8 @@ workflows/demo_workflow.py
 ```
 
 ### 对外接口
+
+第一周主流程调用 `POST /api/v1/data/ingest`，该接口验签、验哈希并直接返回新建的 `assetId`。`POST /api/v1/data/assets` 是不提交读数的独立资产元信息登记接口，仍需实现，但不参与一键演示主流程。
 
 ```http
 POST /api/v1/demo/run
@@ -481,7 +450,7 @@ GET /health
 3. 每个本地客户端只读取自己的本地数据分片。
 4. 训练轻量模型并生成本地模型参数或梯度。
 5. 接收或生成各主体模型更新摘要。
-6. 调用 `privacy-compute` 执行参数保护或安全聚合。
+6. 向 `api-gateway` 返回模型更新摘要，由网关调用 `privacy-compute` 执行参数保护或安全聚合。
 7. 执行 FedAvg 生成全局模型。
 8. 维护 `global_model_vN` 模型版本。
 9. 输出 MAE、RMSE、MAPE 等模型效果指标。
@@ -589,6 +558,34 @@ services/federated-learning/
 }
 ```
 
+启动任务输出：
+
+```json
+{
+  "trainingTaskId": "fl_task_001",
+  "status": "running",
+  "currentRound": 1,
+  "updates": [
+    {
+      "participantDid": "did:vpp:load-aggregator:001",
+      "sampleCount": 500,
+      "modelUpdateUri": "storage://updates/fl_task_001/round_1/load_client.json",
+      "updateHash": "sha256:update001"
+    }
+  ]
+}
+```
+
+FedAvg 聚合请求：
+
+```json
+{
+  "aggregateId": "aggregate_001",
+  "aggregateResultUri": "storage://aggregates/fl_task_001/round_1/result.json",
+  "aggregateHash": "sha256:agg001"
+}
+```
+
 聚合输出：
 
 ```json
@@ -614,8 +611,8 @@ services/federated-learning/
 4. 每轮将当前全局模型下发给本地客户端。
 5. 各本地客户端在本地数据上训练，生成模型参数更新。
 6. 计算每个本地更新的哈希和样本数。
-7. 将参数更新交给 `privacy-compute` 进行安全处理。
-8. 获取安全聚合后的参数结果。
+7. 将参数更新摘要返回给 `api-gateway`，由网关调用 `privacy-compute`。
+8. 接收网关传回的 `aggregateId`、`aggregateResultUri` 和 `aggregateHash`。
 9. 执行 FedAvg 得到新一轮全局模型。
 10. 计算 MAE、RMSE、MAPE。
 11. 生成模型版本号和模型哈希。
@@ -654,7 +651,7 @@ GET /health
 ### 与其他模块关系
 
 1. `api-gateway` 调用本模块创建任务和启动训练。
-2. 本模块将模型参数摘要交给 `privacy-compute` 处理。
+2. 本模块将模型参数摘要返回给 `api-gateway`，由网关调用 `privacy-compute` 处理并传回聚合结果。
 3. `api-gateway` 将训练开始、参数提交、模型生成等事件交给 `ledger-service` 存证。
 4. `ai-agent` 通过 `api-gateway` 使用最新 `global_model_vN` 完成预测和报告生成。
 ## 9. 模块 5：隐私计算模块
@@ -689,6 +686,7 @@ GET /health
   "updates": [
     {
       "participantDid": "did:vpp:load-aggregator:001",
+      "sampleCount": 500,
       "modelUpdateUri": "storage://updates/fl_task_001/round_1/sub_001.json",
       "updateHash": "sha256:update001"
     }
@@ -701,6 +699,7 @@ GET /health
 
 ```json
 {
+  "aggregateId": "aggregate_001",
   "trainingTaskId": "fl_task_001",
   "roundId": 1,
   "aggregateResultUri": "storage://aggregates/fl_task_001/round_1/result.json",
@@ -860,7 +859,7 @@ audit_trace_queried
 
 1. 调用最新全局模型进行预测。
 2. 生成虚拟电厂交易策略建议。
-3. 查询审计链路并回答问题。
+3. 基于 `api-gateway` 查询账本后提供的 `evidenceEventIds` 回答审计问题。
 4. 生成交易审计报告。
 5. 输出可展示的业务结论。
 
@@ -869,7 +868,7 @@ audit_trace_queried
 1. 不直接访问原始电表数据。
 2. 不训练模型。
 3. 不审批授权。
-4. 不直接写链，由 `api-gateway` 编排存证。
+4. 不直接调用 `ledger-service` 或写链，由 `api-gateway` 查询证据并编排存证。
 
 ### 输入
 
@@ -887,11 +886,24 @@ audit_trace_queried
 }
 ```
 
+审计问答请求：
+
+```json
+{
+  "businessId": "demo_001",
+  "modelVersion": "global_model_v1",
+  "evidenceEventIds": ["evt_data_001", "evt_model_001"],
+  "question": "本次预测使用了哪个模型版本？"
+}
+```
+
 审计报告请求：
 
 ```json
 {
-  "businessId": "fl_task_001",
+  "businessId": "demo_001",
+  "modelVersion": "global_model_v1",
+  "evidenceEventIds": ["evt_data_001", "evt_auth_001", "evt_model_001"],
   "reportType": "transaction_audit"
 }
 ```
@@ -917,7 +929,7 @@ audit_trace_queried
 2. 调用模型预测接口或本地模型文件。
 3. 生成可调节容量预测。
 4. 生成交易策略建议。
-5. 查询 ledger 证据链摘要。
+5. 使用网关提供的 `evidenceEventIds` 证据链摘要，不直接调用账本服务。
 6. 生成审计报告。
 7. 返回给 `api-gateway`。
 
@@ -1178,7 +1190,7 @@ Mock 先串通链路，真实 FedAvg 证明核心能力，隐私计算增强展�
 3. 必须提供 GET /health。
 4. 必须实现 Issue 中指定的接口。
 5. 请求和响应必须符合 docs/api/openapi.md。
-6. 返回格式必须是 { code, message, data }。
+6. 统一响应、错误码、追踪和幂等必须遵循 `docs/api/response-and-errors.md`。
 7. 必须提供 README.md，说明如何启动和测试。
 8. 必须提供最小测试或 curl 调用示例。
 9. 不要改变接口字段名，除非先修改 docs/api/openapi.md 并通知技术负责人。

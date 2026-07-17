@@ -8,41 +8,15 @@
 
 - API 前缀：`/api/v1`。
 - 请求格式：`application/json`。
-- 成功响应：`code = 0`，业务结果放在 `data`。
-- 失败响应：`data = null`，客户端按 `code` 处理。
 - 所有服务提供 `GET /health`。
 - 时间字段使用 ISO 8601，例如 `2026-07-10T10:00:00+08:00`。
 - DID 使用字符串，例如 `did:vpp:load-aggregator:001`。
 - 哈希使用 `sha256:<hex>`，签名和密文使用 Base64 字符串。
-- `traceId` 由网关生成并通过 `X-Trace-Id` 传递。
-- 写操作建议使用 `Idempotency-Key`，具体规则见 [公共响应与错误码](./response-and-errors.md)。
+- 统一响应、错误码、追踪和幂等规则只引用 [公共响应与错误码](./response-and-errors.md)；本文档只定义端点的业务字段和示例。
 
-## 2. 公共响应 Schema
+## 2. 公共契约引用
 
-成功响应：
-
-```json
-{
-  "code": 0,
-  "message": "ok",
-  "data": {},
-  "traceId": "trace_20260710_000001"
-}
-```
-
-错误响应：
-
-```json
-{
-  "code": 40001,
-  "message": "invalid request",
-  "data": null,
-  "traceId": "trace_20260710_000001",
-  "details": [{ "field": "participants", "reason": "must not be empty" }]
-}
-```
-
-错误码完整目录、HTTP 映射、幂等和健康检查规则见 [response-and-errors.md](./response-and-errors.md)。
+统一响应包络、错误码、`traceId`、`Idempotency-Key` 和健康检查规则均以 [公共响应与错误码](./response-and-errors.md) 为准。端点的成功 `data` 示例只展示业务字段；例如一键演示的完整响应按第 4 节说明在公共包络中携带 `traceId`。
 
 ## 3. 接口覆盖矩阵
 
@@ -111,18 +85,21 @@
   "globalModelVersion": "global_model_v1",
   "metrics": { "mae": 2.31, "rmse": 3.72, "mape": 0.081 },
   "predictionId": "prediction_001",
+  "strategyId": "strategy_001",
   "auditReportId": "report_001",
   "ledgerTxIds": ["tx_data_001", "tx_auth_001", "tx_model_001", "tx_agent_001"]
 }
 ```
 
-可能错误：`40001`、`40102`、`40302`、`42201`、`50203`、`50401`。
+完整成功响应还必须在公共包络中包含与响应头 `X-Trace-Id` 相同的 `traceId`。`businessId`、模型指标、三个 Agent 结果标识和存证交易 ID 均为冻结字段。
+
+错误码和 HTTP 映射见 [公共响应与错误码](./response-and-errors.md)。
 
 ### `GET /api/v1/demo/status/{businessId}`
 
 查询演示业务状态，不重复执行流程。成功 `data` 返回 `businessId`、`status`、`currentStage`、`lastEventType`、`globalModelVersion`、`retryable` 和 `error`。
 
-可能错误：`40001`、`40402`。
+错误码和 HTTP 映射见 [公共响应与错误码](./response-and-errors.md)。
 
 ## 5. meter-simulator
 
@@ -147,29 +124,29 @@
 }
 ```
 
-可能错误：`40001`、`40002`、`40102`、`50001`。
+错误码和 HTTP 映射见 [公共响应与错误码](./response-and-errors.md)。
 
 ## 6. data-ingestion
 
 ### `POST /api/v1/data/ingest`
 
-接收密文批次并完成签名、哈希校验。请求包含 `readingBatchId`、`ownerDid`、`readings[]`；每条 reading 至少包含 `readingId`、`meterId`、`ciphertext`、`signature`、`hash`、`timestamp`。
+主流程使用本接口接收密文批次、完成签名与哈希校验，并同时登记数据资产。请求包含 `readingBatchId`、`ownerDid`、`readings[]`；每条 reading 至少包含 `readingId`、`meterId`、`ciphertext`、`signature`、`hash`、`timestamp`。
 
 成功 `data`：`assetId`、`readingBatchId`、`ownerDid`、`assetType`、`sensitivityLevel`、`status`。
 
-可能错误：`40001`、`40103`、`40104`、`40902`。
+错误码和 HTTP 映射见 [公共响应与错误码](./response-and-errors.md)。
 
 ### `POST /api/v1/data/assets`
 
-登记资产元信息。请求至少包含 `readingBatchId`、`ownerDid`、`assetType`、`sensitivityLevel`、`purpose`；成功返回资产登记结果。
+独立登记资产元信息，不属于第一周一键演示主流程，也不要求再次提交读数。请求至少包含 `readingBatchId`、`ownerDid`、`assetType`、`sensitivityLevel`、`purpose`；成功返回资产登记结果。
 
-可能错误：`40002`、`40102`、`40301`、`40901`。
+错误码和 HTTP 映射见 [公共响应与错误码](./response-and-errors.md)。
 
 ### `GET /api/v1/data/assets/{assetId}`
 
 查询资产元信息；响应不得返回原始明文或未保护模型参数。成功返回 `assetId`、`ownerDid`、`assetType`、`sensitivityLevel`、`status`、`createdAt`。
 
-可能错误：`40101`、`40301`、`40401`。
+错误码和 HTTP 映射见 [公共响应与错误码](./response-and-errors.md)。
 
 ## 7. identity-did
 
@@ -197,7 +174,7 @@
 
 查询授权申请完整记录和当前状态。
 
-以上接口可能错误：`40001`、`40002`、`40102`、`40301`、`40303`、`40401`、`40902`。
+以上接口的错误码和 HTTP 映射见 [公共响应与错误码](./response-and-errors.md)。
 
 ## 8. federated-learning
 
@@ -207,7 +184,23 @@
 
 ### `POST /api/v1/fl/tasks/{taskId}/start`
 
-启动任务；请求可选 `startRound`，成功返回 `trainingTaskId`、`status: running`、`currentRound`。
+启动任务；请求可选 `startRound`。成功 `data` 返回当前轮次可交给隐私计算的更新摘要：
+
+```json
+{
+  "trainingTaskId": "fl_task_001",
+  "status": "running",
+  "currentRound": 1,
+  "updates": [
+    {
+      "participantDid": "did:vpp:load-aggregator:001",
+      "sampleCount": 500,
+      "modelUpdateUri": "storage://updates/fl_task_001/round_1/load_client.json",
+      "updateHash": "sha256:update001"
+    }
+  ]
+}
+```
 
 ### `POST /api/v1/fl/tasks/{taskId}/rounds/{roundId}/updates`
 
@@ -215,7 +208,17 @@
 
 ### `POST /api/v1/fl/tasks/{taskId}/rounds/{roundId}/aggregate`
 
-触发安全聚合和 FedAvg。成功 `data`：
+接收网关从 `privacy-compute` 取得的安全聚合结果并执行 FedAvg。请求：
+
+```json
+{
+  "aggregateId": "aggregate_001",
+  "aggregateResultUri": "storage://aggregates/fl_task_001/round_3/result.json",
+  "aggregateHash": "sha256:agg001"
+}
+```
+
+成功 `data`：
 
 ```json
 {
@@ -240,7 +243,7 @@
 
 返回模型元信息、模型哈希、训练任务、轮次、指标和模型 URI；不得返回未授权的原始参数。
 
-以上接口可能错误：`40001`、`40102`、`40302`、`40403`、`40404`、`40902`、`42201`、`42202`、`42204`、`42901`。
+以上接口的错误码和 HTTP 映射见 [公共响应与错误码](./response-and-errors.md)。
 
 ## 9. privacy-compute
 
@@ -272,7 +275,7 @@
 
 返回聚合元信息、参与方数量、隐私模式、结果 URI 和摘要哈希；不返回单个参与方明文更新。
 
-以上接口可能错误：`40001`、`40102`、`40302`、`40401`、`42202`、`42203`、`50001`。
+以上接口的错误码和 HTTP 映射见 [公共响应与错误码](./response-and-errors.md)。
 
 ## 10. ledger-service
 
@@ -288,7 +291,7 @@
 
 返回按时间排序的完整证据链：事件 ID、事件类型、时间、摘要哈希、交易 ID、区块高度和链路状态。
 
-以上接口可能错误：`40001`、`40002`、`40401`、`40402`、`40903`、`50002`。
+以上接口的错误码和 HTTP 映射见 [公共响应与错误码](./response-and-errors.md)。
 
 ## 11. ai-agent
 
@@ -302,11 +305,11 @@
 
 ### `POST /api/v1/agent/audit-question`
 
-请求：`businessId`、`question`。成功返回 `answer`、`evidenceEventIds`、`confidence`。
+请求：`businessId`、`modelVersion`、`evidenceEventIds[]`、`question`。证据 ID 由网关查询账本后提供；成功返回 `answer`、实际引用的 `evidenceEventIds`、`modelVersion` 和 `confidence`。
 
 ### `POST /api/v1/agent/audit-report`
 
-请求：`businessId`、`reportType`。成功 `data`：
+请求：`businessId`、`modelVersion`、`evidenceEventIds[]`、`reportType`。证据 ID 由网关查询账本后提供；成功 `data`：
 
 ```json
 {
@@ -318,7 +321,7 @@
 }
 ```
 
-以上接口可能错误：`40001`、`40002`、`40302`、`40401`、`40404`、`40902`、`50201`。
+以上接口的错误码和 HTTP 映射见 [公共响应与错误码](./response-and-errors.md)。
 
 ## 12. 所有服务健康检查
 
