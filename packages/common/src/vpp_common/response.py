@@ -48,11 +48,17 @@ def failure(
     trace_id: str | None = None,
     details: list[ErrorDetail] | None = None,
 ) -> ApiResponse[None]:
+    """Build an error envelope for exception handlers and non-HTTP use.
+
+    FastAPI routes must raise ServiceError so the exception handler can apply
+    the frozen non-200 HTTP status.
+    """
+
     error_code = ErrorCode(code)
     return ApiResponse(
         code=int(error_code),
         message=ERROR_MESSAGES[error_code],
         data=None,
         traceId=resolve_trace_id(trace_id),
-        details=details,
+        details=details or None,
     )

@@ -28,6 +28,10 @@ def build_app() -> FastAPI:
             details=[ErrorDetail(field="assetId", reason="not found")],
         )
 
+    @app.get("/business-failure")
+    def business_failure():
+        raise ServiceError(ErrorCode.INVALID_RESOURCE_STATE)
+
     @app.post("/validation-error")
     def validation_error(payload: Payload):
         return success(payload.model_dump())
@@ -113,6 +117,26 @@ def test_service_error_uses_unified_envelope():
         "traceId",
         "timestamp",
         "details",
+    }
+
+
+def test_route_raises_service_error_with_non_200_status_and_exact_base_keys():
+    response = TestClient(build_app()).get(
+        "/business-failure", headers={"X-Trace-Id": "trace_business"}
+    )
+
+    assert response.status_code == 409
+    assert response.json()["code"] == 40902
+    assert response.json()["message"] == "invalid resource state"
+    assert response.json()["data"] is None
+    assert response.json()["traceId"] == "trace_business"
+    assert response.headers["X-Trace-Id"] == "trace_business"
+    assert set(response.json()) == {
+        "code",
+        "message",
+        "data",
+        "traceId",
+        "timestamp",
     }
 
 

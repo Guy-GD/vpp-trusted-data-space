@@ -1,4 +1,4 @@
-﻿# vpp-trusted-data-space
+# vpp-trusted-data-space
 
 面向虚拟电厂跨主体交易的可信数据空间协同计算与审计平台。
 

@@ -2,6 +2,8 @@ import json
 import re
 from pathlib import Path
 
+from vpp_common.errors import ERROR_MESSAGES, ErrorCode
+
 
 ROOT = Path(__file__).resolve().parents[2]
 GATEWAY_ONLY_POLICY = (
@@ -17,6 +19,47 @@ BACKEND_MODULES = {
     "privacy-compute",
     "ledger-service",
     "ai-agent",
+}
+FROZEN_ENDPOINTS = {
+    ("api-gateway", "POST", "/api/v1/demo/run"),
+    ("api-gateway", "GET", "/api/v1/demo/status/{businessId}"),
+    ("meter-simulator", "POST", "/api/v1/meter/readings/generate"),
+    ("data-ingestion", "POST", "/api/v1/data/ingest"),
+    ("data-ingestion", "POST", "/api/v1/data/assets"),
+    ("data-ingestion", "GET", "/api/v1/data/assets/{assetId}"),
+    ("identity-did", "POST", "/api/v1/identity/subjects"),
+    ("identity-did", "POST", "/api/v1/identity/devices"),
+    ("identity-did", "POST", "/api/v1/identity/verify"),
+    ("identity-did", "POST", "/api/v1/auth/requests"),
+    ("identity-did", "POST", "/api/v1/auth/requests/{authId}/approve"),
+    ("identity-did", "GET", "/api/v1/auth/requests/{authId}"),
+    ("federated-learning", "POST", "/api/v1/fl/tasks"),
+    ("federated-learning", "POST", "/api/v1/fl/tasks/{taskId}/start"),
+    (
+        "federated-learning",
+        "POST",
+        "/api/v1/fl/tasks/{taskId}/rounds/{roundId}/updates",
+    ),
+    (
+        "federated-learning",
+        "POST",
+        "/api/v1/fl/tasks/{taskId}/rounds/{roundId}/aggregate",
+    ),
+    ("federated-learning", "GET", "/api/v1/fl/tasks/{taskId}"),
+    ("federated-learning", "GET", "/api/v1/fl/tasks/{taskId}/metrics"),
+    ("federated-learning", "GET", "/api/v1/fl/models/{modelVersion}"),
+    ("privacy-compute", "POST", "/api/v1/privacy/model-updates/encrypt"),
+    ("privacy-compute", "POST", "/api/v1/privacy/model-updates/mask"),
+    ("privacy-compute", "POST", "/api/v1/privacy/secure-aggregate"),
+    ("privacy-compute", "GET", "/api/v1/privacy/aggregates/{aggregateId}"),
+    ("ledger-service", "POST", "/api/v1/ledger/events"),
+    ("ledger-service", "GET", "/api/v1/ledger/events/{eventId}"),
+    ("ledger-service", "GET", "/api/v1/ledger/traces/{businessId}"),
+    ("ai-agent", "POST", "/api/v1/agent/predict"),
+    ("ai-agent", "POST", "/api/v1/agent/trading-strategy"),
+    ("ai-agent", "POST", "/api/v1/agent/audit-question"),
+    ("ai-agent", "POST", "/api/v1/agent/audit-report"),
+    ("所有服务", "GET", "/health"),
 }
 STANDARD_HTTP_METHODS = {
     "GET",
@@ -37,6 +80,7 @@ ENDPOINT_REQUIREMENT_MARKERS = (
     "**幂等规则**：",
 )
 FORMAL_UTF8_FILES = (
+    "README.md",
     "docs/api/openapi.md",
     "docs/api/response-and-errors.md",
     "docs/design/main-flow.md",
@@ -397,6 +441,8 @@ def test_openapi_coverage_matrix_matches_each_backend_external_interface():
     matrix_modules = {module for module, _, _ in matrix_rows}
     expected_modules = BACKEND_MODULES | {"所有服务"}
 
+    assert len(FROZEN_ENDPOINTS) == 31
+    assert set(matrix_rows) == FROZEN_ENDPOINTS
     assert matrix_modules == expected_modules
     assert len(matrix_rows) == len(set(matrix_rows))
     assert all(method in STANDARD_HTTP_METHODS for _, method, _ in matrix_rows)
@@ -454,6 +500,38 @@ def test_public_response_document_matches_actual_frozen_key_sets():
     assert "仅在存在字段级详情时返回 `details`" in failure_section
 
 
+def test_failure_http_usage_boundary_is_frozen_in_public_docs():
+    readme = read("packages/common/README.md")
+    response_doc = read("docs/api/response-and-errors.md")
+
+    for document in (readme, response_doc):
+        assert "异常处理器/非 HTTP 场景的包络构造器" in document
+        assert "禁止在 FastAPI 路由中直接 `return failure(...)`" in document
+        assert "raise ServiceError(code, details=...)" in document
+
+
+def test_documented_error_catalog_exactly_matches_public_package():
+    response_doc = numbered_section(read("docs/api/response-and-errors.md"), 5)
+    rows = re.findall(
+        r"^\| `(\d{5})` \| `([^`]+)` \|",
+        response_doc,
+        flags=re.MULTILINE,
+    )
+    documented = {int(code): message for code, message in rows}
+    expected = {int(code): message for code, message in ERROR_MESSAGES.items()}
+
+    assert len(rows) == len(documented) == len(ErrorCode) == 34
+    assert documented == expected
+
+
+def test_openapi_change_rules_require_common_error_reference_not_failure_example():
+    rules = numbered_section(read("docs/api/openapi.md"), 13)
+
+    assert "每个接口必须有“可能错误”" in rules
+    assert "引用公共错误目录" in rules
+    assert "失败示例" not in rules
+
+
 def test_common_package_contract_excludes_module_specific_and_security_helpers():
     common = numbered_section(read("docs/design/module-contracts.md"), 13)
 
@@ -494,3 +572,4 @@ def test_formal_files_are_utf8_without_bom_and_repository_freezes_lf():
         raw = (ROOT / relative_path).read_bytes()
         assert not raw.startswith(b"\xef\xbb\xbf"), f"UTF-8 BOM: {relative_path}"
         raw.decode("utf-8", errors="strict")
+        assert b"\r\n" not in raw, f"CRLF: {relative_path}"

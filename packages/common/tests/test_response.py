@@ -1,11 +1,11 @@
 from datetime import datetime
-from inspect import signature
+from inspect import getdoc, signature
 
 import pytest
 
 from vpp_common.errors import ERROR_MESSAGES, ErrorCode, http_status_for
 from vpp_common.fastapi_support import ServiceError
-from vpp_common.response import failure, success
+from vpp_common.response import ApiResponse, failure, success
 from vpp_common.schemas import ErrorDetail
 
 
@@ -72,6 +72,32 @@ def test_failure_uses_catalog_message_and_details():
     assert response.details == [
         ErrorDetail(field="participants", reason="must not be empty")
     ]
+
+
+def test_failure_normalizes_empty_details_and_serializes_exact_base_keys():
+    response = failure(
+        ErrorCode.INVALID_REQUEST,
+        trace_id="trace_existing",
+        details=[],
+    )
+
+    assert isinstance(response, ApiResponse)
+    assert response.details is None
+    assert set(response.model_dump()) == {
+        "code",
+        "message",
+        "data",
+        "traceId",
+        "timestamp",
+    }
+
+
+def test_failure_docstring_freezes_non_http_usage_boundary():
+    documentation = getdoc(failure)
+
+    assert documentation is not None
+    assert "exception handlers and non-HTTP" in documentation
+    assert "FastAPI routes must raise ServiceError" in documentation
 
 
 def test_response_builders_and_service_error_do_not_expose_message_override():

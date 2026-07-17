@@ -67,6 +67,14 @@
 
 失败响应始终包含 `code`、`message`、`data: null`、`traceId`、`timestamp`。仅在存在字段级详情时返回 `details`；没有详情时实际 JSON 不得包含该键。`failure()` 与 `ServiceError` 的 `message` 始终来自下方冻结目录，不提供公开覆盖参数，也不得返回内部异常文本。
 
+### 3.1 HTTP 失败构造边界
+
+`failure()` 保持冻结公开导出并返回 `ApiResponse`，但它只用于异常处理器/非 HTTP 场景的包络构造器。HTTP 路由业务失败必须 `raise ServiceError(code, details=...)`，由统一异常处理器按错误码设置非 200 HTTP 状态并生成统一包络。
+
+**禁止在 FastAPI 路由中直接 `return failure(...)`。** 普通返回值会沿成功响应路径保持 HTTP `200`；公共包不使用响应体中间件检查业务码并猜测 HTTP 状态。
+
+`details=[]` 与无详情语义相同：`failure(..., details=[])` 必须规范化为 `details=None`，序列化 JSON 不包含 `details`。
+
 ## 4. HTTP 状态码映射
 
 | HTTP | 使用场景 | 典型业务码 |
