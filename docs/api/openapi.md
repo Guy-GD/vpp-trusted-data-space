@@ -184,7 +184,7 @@
 
 ### `POST /api/v1/fl/tasks/{taskId}/start`
 
-启动任务；请求可选 `startRound`。成功 `data` 返回当前轮次可交给隐私计算的更新摘要：
+启动任务；请求可选 `startRound`。当前轮次可交给隐私计算的更新摘要如下。成功 `data`：
 
 ```json
 {
@@ -257,7 +257,27 @@
 
 ### `POST /api/v1/privacy/secure-aggregate`
 
-请求：`trainingTaskId`、`roundId`、`updates[]`、`privacyMode`。成功 `data`：
+请求字段：`trainingTaskId`、`roundId`、`updates[]`、`privacyMode`。
+
+请求：
+
+```json
+{
+  "trainingTaskId": "fl_task_001",
+  "roundId": 1,
+  "updates": [
+    {
+      "participantDid": "did:vpp:load-aggregator:001",
+      "sampleCount": 500,
+      "modelUpdateUri": "storage://updates/fl_task_001/round_1/load_client.json",
+      "updateHash": "sha256:update001"
+    }
+  ],
+  "privacyMode": "secure_masking"
+}
+```
+
+成功 `data`：
 
 ```json
 {
@@ -305,11 +325,37 @@
 
 ### `POST /api/v1/agent/audit-question`
 
-请求：`businessId`、`modelVersion`、`evidenceEventIds[]`、`question`。证据 ID 由网关查询账本后提供；成功返回 `answer`、实际引用的 `evidenceEventIds`、`modelVersion` 和 `confidence`。
+请求字段：`businessId`、`modelVersion`、`evidenceEventIds[]`、`question`。
+
+请求：
+
+```json
+{
+  "businessId": "demo_001",
+  "modelVersion": "global_model_v1",
+  "evidenceEventIds": ["evt_data_001", "evt_model_001"],
+  "question": "本次预测使用了哪个模型版本？"
+}
+```
+
+证据 ID 由网关查询账本后提供；成功返回 `answer`、实际引用的 `evidenceEventIds`、`modelVersion` 和 `confidence`。
 
 ### `POST /api/v1/agent/audit-report`
 
-请求：`businessId`、`modelVersion`、`evidenceEventIds[]`、`reportType`。证据 ID 由网关查询账本后提供；成功 `data`：
+请求字段：`businessId`、`modelVersion`、`evidenceEventIds[]`、`reportType`。
+
+请求：
+
+```json
+{
+  "businessId": "demo_001",
+  "modelVersion": "global_model_v1",
+  "evidenceEventIds": ["evt_data_001", "evt_auth_001", "evt_model_001"],
+  "reportType": "transaction_audit"
+}
+```
+
+证据 ID 由网关查询账本后提供；成功 `data`：
 
 ```json
 {
@@ -325,7 +371,7 @@
 
 ## 12. 所有服务健康检查
 
-每个后端服务均提供 `GET /health`。成功 `data`：`{ "service": "service-name", "status": "healthy" }`；未就绪时返回 HTTP `503` 和业务码 `50301`/`50302`，仍使用统一响应包络。
+每个后端服务均提供 `GET /health`。健康检查的统一响应包络、HTTP 映射和错误码以 [公共响应与错误码](./response-and-errors.md) 为准。
 
 ## 13. 接口变更规则
 

@@ -8,6 +8,27 @@ GATEWAY_ONLY_POLICY = (
     "第一周仅 `api-gateway` 负责跨模块编排和调用 `ledger-service`；"
     "其他业务模块不得直接调用 `ledger-service`。"
 )
+BACKEND_MODULES = {
+    "api-gateway",
+    "meter-simulator",
+    "data-ingestion",
+    "identity-did",
+    "federated-learning",
+    "privacy-compute",
+    "ledger-service",
+    "ai-agent",
+}
+STANDARD_HTTP_METHODS = {
+    "GET",
+    "POST",
+    "PUT",
+    "PATCH",
+    "DELETE",
+    "HEAD",
+    "OPTIONS",
+    "TRACE",
+    "CONNECT",
+}
 
 
 def read(relative_path: str) -> str:
@@ -24,21 +45,44 @@ def numbered_section(text: str, number: int) -> str:
     return match.group(0)
 
 
-def endpoint_section(text: str, start: str, end: str) -> str:
-    return text.split(start, 1)[1].split(end, 1)[0]
-
-
-def public_endpoints(module_section: str) -> set[tuple[str, str]]:
+def endpoint_section(text: str, endpoint: str) -> str:
     match = re.search(
-        r"### .*?\n\n```http\n(.*?)\n```",
-        module_section,
+        rf"^### `{re.escape(endpoint)}`\n(.*?)(?=^### `|^## |\Z)",
+        text,
+        flags=re.MULTILINE | re.DOTALL,
+    )
+    assert match, f"missing endpoint section: {endpoint}"
+    return match.group(0)
+
+
+def json_after_label(section: str, label: str) -> dict:
+    match = re.search(
+        rf"{re.escape(label)}\n\n```json\n(.*?)\n```",
+        section,
         flags=re.DOTALL,
     )
-    assert match, "missing external-interface HTTP block"
-    return {
-        (method, path)
-        for method, path in re.findall(r"^(GET|POST) (/.+)$", match.group(1), re.MULTILINE)
-    }
+    assert match, f"missing JSON example after {label!r}"
+    return json.loads(match.group(1))
+
+
+def external_interface_http_block(module_section: str) -> str:
+    match = re.search(
+        r"^### 对外接口\n\n```http\n(.*?)\n```",
+        module_section,
+        flags=re.MULTILINE | re.DOTALL,
+    )
+    assert match, "missing HTTP block immediately after the external-interface heading"
+    return match.group(1)
+
+
+def parse_http_endpoints(http_block: str) -> list[tuple[str, str]]:
+    return re.findall(r"^([A-Z]+) (\S+)$", http_block, re.MULTILINE)
+
+
+def assert_required_fields(value: dict, fields: tuple[str, ...]) -> None:
+    assert isinstance(value, dict)
+    for field in fields:
+        assert field in value
 
 
 def test_gateway_is_the_only_week_one_cross_module_orchestrator():
@@ -53,68 +97,56 @@ def test_gateway_is_the_only_week_one_cross_module_orchestrator():
     assert "GW->>Ledger: secure_aggregation_finished" in flow
 
 
-def test_fl_start_returns_the_current_round_updates_with_all_required_fields():
-    openapi = read("docs/api/openapi.md")
-    contracts = read("docs/design/module-contracts.md")
+def test_fl_start_response_json_contains_current_round_updates():
     start = endpoint_section(
-        openapi,
-        "### `POST /api/v1/fl/tasks/{taskId}/start`",
-        "### `POST /api/v1/fl/tasks/{taskId}/rounds/{roundId}/updates`",
+        read("docs/api/openapi.md"),
+        "POST /api/v1/fl/tasks/{taskId}/start",
     )
-    fl_contract = numbered_section(contracts, 8)
+    data = json_after_label(start, "成功 `data`：")
 
-    for text in (start, fl_contract):
-        for field in ("updates", "participantDid", "sampleCount", "modelUpdateUri", "updateHash"):
-            assert field in text
+    assert isinstance(data["updates"], list)
+    assert data["updates"]
+    assert_required_fields(
+        data["updates"][0],
+        ("participantDid", "sampleCount", "modelUpdateUri", "updateHash"),
+    )
 
 
-def test_gateway_hands_updates_to_privacy_compute_and_receives_aggregate_handoff():
-    openapi = read("docs/api/openapi.md")
-    flow = read("docs/design/main-flow.md")
-    contracts = read("docs/design/module-contracts.md")
+def test_privacy_secure_aggregate_request_and_response_json_are_directional():
     aggregate = endpoint_section(
-        openapi,
-        "### `POST /api/v1/privacy/secure-aggregate`",
-        "### `GET /api/v1/privacy/aggregates/{aggregateId}`",
+        read("docs/api/openapi.md"),
+        "POST /api/v1/privacy/secure-aggregate",
     )
+    request = json_after_label(aggregate, "请求：")
+    response = json_after_label(aggregate, "成功 `data`：")
 
-    assert "GW->>Privacy: POST /api/v1/privacy/secure-aggregate" in flow
-    assert "Privacy-->>GW: aggregateId + aggregateResultUri + aggregateHash" in flow
-    for text in (aggregate, numbered_section(contracts, 9)):
-        for field in ("updates", "aggregateId", "aggregateResultUri", "aggregateHash"):
-            assert field in text
+    assert_required_fields(request, ("trainingTaskId", "roundId", "updates", "privacyMode"))
+    assert isinstance(request["updates"], list)
+    assert request["updates"]
+    assert_required_fields(
+        request["updates"][0],
+        ("participantDid", "sampleCount", "modelUpdateUri", "updateHash"),
+    )
+    assert_required_fields(response, ("aggregateId", "aggregateResultUri", "aggregateHash"))
 
 
-def test_fl_aggregate_accepts_the_privacy_result_before_running_fedavg():
-    openapi = read("docs/api/openapi.md")
-    contracts = read("docs/design/module-contracts.md")
+def test_fl_aggregate_request_json_receives_privacy_result_before_fedavg():
     aggregate = endpoint_section(
-        openapi,
-        "### `POST /api/v1/fl/tasks/{taskId}/rounds/{roundId}/aggregate`",
-        "### `GET /api/v1/fl/tasks/{taskId}`",
+        read("docs/api/openapi.md"),
+        "POST /api/v1/fl/tasks/{taskId}/rounds/{roundId}/aggregate",
     )
-    fl_contract = numbered_section(contracts, 8)
+    request = json_after_label(aggregate, "请求：")
 
-    for text in (aggregate, fl_contract):
-        for field in ("aggregateId", "aggregateResultUri", "aggregateHash"):
-            assert field in text
-        assert "FedAvg" in text
+    assert_required_fields(request, ("aggregateId", "aggregateResultUri", "aggregateHash"))
+    assert "FedAvg" in aggregate
 
 
 def test_data_ingest_is_the_main_flow_while_asset_registration_stays_separate():
     openapi = read("docs/api/openapi.md")
     flow = read("docs/design/main-flow.md")
     contracts = read("docs/design/module-contracts.md")
-    ingest = endpoint_section(
-        openapi,
-        "### `POST /api/v1/data/ingest`",
-        "### `POST /api/v1/data/assets`",
-    )
-    assets = endpoint_section(
-        openapi,
-        "### `POST /api/v1/data/assets`",
-        "### `GET /api/v1/data/assets/{assetId}`",
-    )
+    ingest = endpoint_section(openapi, "POST /api/v1/data/ingest")
+    assets = endpoint_section(openapi, "POST /api/v1/data/assets")
 
     assert "GW->>Ingest: POST /api/v1/data/ingest" in flow
     assert "Ingest-->>GW: assetId" in flow
@@ -124,67 +156,83 @@ def test_data_ingest_is_the_main_flow_while_asset_registration_stays_separate():
     assert "POST /api/v1/data/assets" in numbered_section(contracts, 6)
 
 
-def test_demo_data_and_the_common_envelope_keep_trace_id_separate():
+def test_demo_data_json_and_module_contract_example_exclude_common_envelope():
     openapi = read("docs/api/openapi.md")
-    demo = endpoint_section(
-        openapi,
-        "### `POST /api/v1/demo/run`",
-        "### `GET /api/v1/demo/status/{businessId}`",
-    )
-    match = re.search(r"成功 `data`：\n\n```json\n(.*?)\n```", demo, re.DOTALL)
-    assert match, "missing demo success data example"
-    data = json.loads(match.group(1))
+    contracts = read("docs/design/module-contracts.md")
+    demo = endpoint_section(openapi, "POST /api/v1/demo/run")
+    data = json_after_label(demo, "成功 `data`：")
+    module_data = json_after_label(numbered_section(contracts, 3), "返回示例：")
 
-    for field in (
+    required = (
         "businessId",
         "metrics",
         "predictionId",
         "strategyId",
         "auditReportId",
         "ledgerTxIds",
-    ):
-        assert field in data
-    assert "traceId" not in data
+    )
+    assert_required_fields(data, required)
+    assert_required_fields(module_data, required)
+    for example in (data, module_data):
+        assert "traceId" not in example
+        assert "code" not in example
+        assert "message" not in example
+        assert "data" not in example
     assert "公共包络" in demo
-    assert "traceId" in demo
+    assert "response-and-errors.md" in contracts
 
 
-def test_agent_audit_requests_use_gateway_supplied_ledger_evidence():
+def test_agent_audit_request_json_uses_gateway_supplied_ledger_evidence():
     openapi = read("docs/api/openapi.md")
     flow = read("docs/design/main-flow.md")
     agent_contract = numbered_section(read("docs/design/module-contracts.md"), 11)
-    question = endpoint_section(
-        openapi,
-        "### `POST /api/v1/agent/audit-question`",
-        "### `POST /api/v1/agent/audit-report`",
-    )
-    report = endpoint_section(
-        openapi,
-        "### `POST /api/v1/agent/audit-report`",
-        "## 12.",
-    )
+    question = endpoint_section(openapi, "POST /api/v1/agent/audit-question")
+    report = endpoint_section(openapi, "POST /api/v1/agent/audit-report")
+    question_request = json_after_label(question, "请求：")
+    report_request = json_after_label(report, "请求：")
 
-    for text, unique_field in ((question, "question"), (report, "reportType")):
-        for field in ("businessId", "modelVersion", "evidenceEventIds", unique_field):
-            assert field in text
-        assert "网关查询账本后提供" in text
+    assert_required_fields(
+        question_request,
+        ("businessId", "modelVersion", "evidenceEventIds", "question"),
+    )
+    assert_required_fields(
+        report_request,
+        ("businessId", "modelVersion", "evidenceEventIds", "reportType"),
+    )
+    assert isinstance(question_request["evidenceEventIds"], list)
+    assert isinstance(report_request["evidenceEventIds"], list)
+    assert "网关查询账本后提供" in question
+    assert "网关查询账本后提供" in report
     assert "网关提供的 `evidenceEventIds`" in agent_contract
     assert "不直接调用账本服务" in agent_contract
     assert "网关查询账本证据链后提供 `evidenceEventIds`" in flow
 
 
-def test_openapi_coverage_matrix_matches_every_module_external_interface():
+def test_http_endpoint_parser_accepts_all_standard_methods():
+    block = "\n".join(f"{method} /example" for method in sorted(STANDARD_HTTP_METHODS))
+    assert {method for method, _ in parse_http_endpoints(block)} == STANDARD_HTTP_METHODS
+
+
+def test_openapi_coverage_matrix_matches_each_backend_external_interface():
     openapi = read("docs/api/openapi.md")
     contracts = read("docs/design/module-contracts.md")
     matrix = numbered_section(openapi, 3)
-    matrix_endpoints = {
-        (module, method, path)
-        for module, method, path in re.findall(
-            r"^\|\s*([^|]+?)\s*\|\s*(GET|POST)\s*\|\s*`([^`]+)`\s*\|$",
-            matrix,
-            flags=re.MULTILINE,
-        )
-    }
+    matrix_rows = re.findall(
+        r"^\|\s*([^|]+?)\s*\|\s*([A-Z]+)\s*\|\s*`([^`]+)`\s*\|$",
+        matrix,
+        flags=re.MULTILINE,
+    )
+    matrix_modules = {module for module, _, _ in matrix_rows}
+    expected_modules = BACKEND_MODULES | {"所有服务"}
+
+    assert matrix_modules == expected_modules
+    assert len(matrix_rows) == len(set(matrix_rows))
+    assert {
+        (method, path)
+        for module, method, path in matrix_rows
+        if module == "所有服务"
+    } == {("GET", "/health")}
+
     module_sections = {
         "api-gateway": numbered_section(contracts, 4),
         "meter-simulator": numbered_section(contracts, 5),
@@ -195,13 +243,11 @@ def test_openapi_coverage_matrix_matches_every_module_external_interface():
         "ledger-service": numbered_section(contracts, 10),
         "ai-agent": numbered_section(contracts, 11),
     }
-
-    assert ("所有服务", "GET", "/health") in matrix_endpoints
     for module, section in module_sections.items():
-        expected = {
+        external_rows = parse_http_endpoints(external_interface_http_block(section))
+        assert len(external_rows) == len(set(external_rows))
+        assert set(external_rows) == {
             (method, path)
-            for matrix_module, method, path in matrix_endpoints
+            for matrix_module, method, path in matrix_rows
             if matrix_module == module
-        }
-        expected.add(("GET", "/health"))
-        assert public_endpoints(section) == expected
+        } | {("GET", "/health")}

@@ -66,33 +66,30 @@
 POST /api/v1/demo/run
 ```
 
+公共响应包络、错误码、追踪和幂等规则见 [`docs/api/response-and-errors.md`](../api/response-and-errors.md)。以下仅展示 `POST /api/v1/demo/run` 的业务 `data`：
+
 返回示例：
 
 ```json
 {
-  "code": 0,
-  "message": "demo finished",
-  "data": {
-    "businessId": "demo_001",
-    "readingBatchId": "batch_001",
-    "assetId": "asset_001",
-    "authId": "auth_001",
-    "trainingTaskId": "fl_task_001",
-    "globalModelVersion": "global_model_v1",
-    "metrics": { "mae": 2.31, "rmse": 3.72, "mape": 0.081 },
-    "predictionId": "prediction_001",
-    "strategyId": "strategy_001",
-    "auditReportId": "report_001",
-    "ledgerTxIds": [
-      "tx_data_hash_001",
-      "tx_auth_001",
-      "tx_training_001",
-      "tx_param_001",
-      "tx_model_001",
-      "tx_agent_001"
-    ]
-  },
-  "traceId": "trace_20260710_000001"
+  "businessId": "demo_001",
+  "readingBatchId": "batch_001",
+  "assetId": "asset_001",
+  "authId": "auth_001",
+  "trainingTaskId": "fl_task_001",
+  "globalModelVersion": "global_model_v1",
+  "metrics": { "mae": 2.31, "rmse": 3.72, "mape": 0.081 },
+  "predictionId": "prediction_001",
+  "strategyId": "strategy_001",
+  "auditReportId": "report_001",
+  "ledgerTxIds": [
+    "tx_data_hash_001",
+    "tx_auth_001",
+    "tx_training_001",
+    "tx_param_001",
+    "tx_model_001",
+    "tx_agent_001"
+  ]
 }
 ```
 
@@ -169,9 +166,9 @@ clients/agent_client.py
 workflows/demo_workflow.py
 ```
 
-### 对外接口
-
 第一周主流程调用 `POST /api/v1/data/ingest`，该接口验签、验哈希并直接返回新建的 `assetId`。`POST /api/v1/data/assets` 是不提交读数的独立资产元信息登记接口，仍需实现，但不参与一键演示主流程。
+
+### 对外接口
 
 ```http
 POST /api/v1/demo/run
