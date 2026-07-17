@@ -68,12 +68,12 @@ sequenceDiagram
     GW->>FL: POST /api/v1/fl/tasks
     FL-->>GW: trainingTaskId
     GW->>FL: POST /api/v1/fl/tasks/{taskId}/start
-    FL-->>GW: currentRound + updates
+    FL-->>GW: currentRound=1 + updates
     loop 每个训练轮次
         GW->>Privacy: POST /api/v1/privacy/secure-aggregate
         Privacy-->>GW: aggregateId + aggregateResultUri + aggregateHash
         GW->>FL: POST /api/v1/fl/tasks/{taskId}/rounds/{roundId}/aggregate
-        FL-->>GW: globalModelVersion + metrics / next updates
+        FL-->>GW: status + nextRound + updates / final modelHash + metrics
         GW->>Ledger: secure_aggregation_finished
     end
     GW->>Ledger: global_model_created
@@ -110,11 +110,12 @@ sequenceDiagram
 
 1. 网关创建训练任务并声明参与方、资产、目标、算法和轮次。
 2. 联邦学习服务在单服务内模拟多个本地客户端，每个客户端只加载自己的数据分片。
-3. 联邦学习服务通过启动响应向网关返回当前轮次 `updates`；每项至少包含 `participantDid`、`sampleCount`、`modelUpdateUri` 和 `updateHash`，不上传原始数据。
-4. 网关把 `updates` 交给隐私计算服务执行安全掩码、同态加密演示或 MPC 风格聚合。
-5. 隐私计算向网关返回 `aggregateId`、`aggregateResultUri`、参与方数量和 `aggregateHash`。
-6. 网关把 `aggregateId`、`aggregateResultUri` 和 `aggregateHash` 交给联邦学习服务执行 FedAvg，生成 `global_model_vN` 并计算 MAE、RMSE、MAPE。
-7. 网关将训练开始、参数提交、安全聚合、模型生成和评估事件交给账本存证；业务服务不直接写账本。
+3. `POST .../start` 固定返回第 1 轮 `currentRound: 1` 和完整 `updates[]`；每项包含 `participantDid`、`sampleCount`、`modelUpdateUri`、`updateHash`，不上传原始数据。
+4. `POST .../rounds/{roundId}/updates` 的 `taskId`、`roundId` 只来自路径；请求体只包含 `participantDid`、`sampleCount`、`modelUpdateUri`、`updateHash`。
+5. 每轮都由网关先把当前 `updates` 交给 `POST /api/v1/privacy/secure-aggregate`，再把返回的 `aggregateId`、`aggregateResultUri`、`aggregateHash` 交给 FL aggregate 执行 FedAvg。FL aggregate 的请求体只包含这三个字段；`taskId`、`roundId` 只来自路径。
+6. 非最终轮 FL aggregate 返回 `status: running`、整数 `nextRound` 和下一轮完整 `updates[]`，网关据此继续下一轮 secure-aggregate 与 FL aggregate。
+7. 最终轮 FL aggregate 返回 `status: completed`、`nextRound: null`、`updates: []`，并返回最终 `globalModelVersion`、`modelHash`、`metrics`（MAE、RMSE、MAPE）。
+8. 网关将训练开始、参数提交、每轮安全聚合、最终模型生成和评估事件交给账本存证；业务服务不直接写账本。
 
 ### 4.4 Agent 业务输出
 

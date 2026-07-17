@@ -32,6 +32,10 @@ asset_id = new_id("asset_")
 
 `install_exception_handlers()` 同时安装追踪中间件：读取或生成 `X-Trace-Id`，在当前请求的响应体、响应头及下游调用中复用同一个值。
 
+`success(data)` 的 `message` 固定为 `ok`；`failure(code)` 和 `ServiceError(code)` 的 `message` 固定取自错误码目录，三个公开 API 均不接受调用方覆盖 message。成功 JSON 固定包含 `code`、`message`、`data`、`traceId`、`timestamp`；失败 JSON 只有存在字段详情时才增加 `details`。
+
+标准 HTTP 异常保留原 HTTP 状态，只透传 `Allow`、`WWW-Authenticate`、`Retry-After` 三个协议头，且不会把异常 `detail` 返回客户端。
+
 ## 公共 API 冻结规则
 
 - 当前公共 API 版本：`0.1.0`。

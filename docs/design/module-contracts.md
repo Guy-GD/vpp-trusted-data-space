@@ -1,4 +1,4 @@
-﻿# 模块化架构与接口契约说明
+# 模块化架构与接口契约说明
 
 本文档用于指导团队基于“虚拟电厂跨主体数据协同交易与审计”场景开展模块化开发。所有成员使用 Agent 写代码时，必须先阅读本文档，并严格按照模块职责、输入输出和接口契约实现。
 
@@ -34,7 +34,7 @@
 | 6 | 区块链存证模块 | `services/ledger-service` | 关键操作、数据哈希、模型版本、Agent 调用存证 | `api-gateway` |
 | 7 | Agent 业务模块 | `services/ai-agent` | 预测、交易策略、审计问答、报告生成 | `api-gateway` |
 | 8 | 前端展示模块 | `apps/web-dashboard` | 系统可视化、链路展示、报告展示 | 用户 / `api-gateway` |
-| 9 | 公共包模块 | `packages/common` | 公共模型、响应格式、工具函数、类型定义 | 所有后端模块 |
+| 9 | 公共包模块 | `packages/common` | 统一响应、错误码、`traceId`、UTC 时间、冻结 ID、基础 Schema | 所有后端模块 |
 
 ## 3. 完整业务链路
 
@@ -525,18 +525,18 @@ services/federated-learning/
 }
 ```
 
-本地参数上传：
+本地参数上传请求：
 
 ```json
 {
-  "trainingTaskId": "fl_task_001",
-  "roundId": 1,
   "participantDid": "did:vpp:load-aggregator:001",
   "sampleCount": 500,
   "modelUpdateUri": "storage://updates/fl_task_001/round_1/load_client.json",
   "updateHash": "sha256:update001"
 }
 ```
+
+该请求用于 `POST /api/v1/fl/tasks/{taskId}/rounds/{roundId}/updates`；`taskId`、`roundId` 只来自路径，禁止在请求体重复。
 
 ### 输出
 
@@ -583,12 +583,34 @@ FedAvg 聚合请求：
 }
 ```
 
-聚合输出：
+非最终轮聚合输出：
+
+```json
+{
+  "trainingTaskId": "fl_task_001",
+  "roundId": 1,
+  "status": "running",
+  "nextRound": 2,
+  "updates": [
+    {
+      "participantDid": "did:vpp:load-aggregator:001",
+      "sampleCount": 500,
+      "modelUpdateUri": "storage://updates/fl_task_001/round_2/load_client.json",
+      "updateHash": "sha256:update002"
+    }
+  ]
+}
+```
+
+最终轮聚合输出：
 
 ```json
 {
   "trainingTaskId": "fl_task_001",
   "roundId": 3,
+  "status": "completed",
+  "nextRound": null,
+  "updates": [],
   "globalModelVersion": "global_model_v1",
   "modelHash": "sha256:model123",
   "participantCount": 3,
@@ -609,11 +631,11 @@ FedAvg 聚合请求：
 5. 各本地客户端在本地数据上训练，生成模型参数更新。
 6. 计算每个本地更新的哈希和样本数。
 7. 将参数更新摘要返回给 `api-gateway`，由网关调用 `privacy-compute`。
-8. 接收网关传回的 `aggregateId`、`aggregateResultUri` 和 `aggregateHash`。
-9. 执行 FedAvg 得到新一轮全局模型。
-10. 计算 MAE、RMSE、MAPE。
-11. 生成模型版本号和模型哈希。
-12. 返回训练结果给 `api-gateway`。
+8. 每轮接收网关传回的 `aggregateId`、`aggregateResultUri` 和 `aggregateHash`；FL aggregate 请求体只含这三个字段，任务与轮次 ID 只来自路径。
+9. 执行 FedAvg 得到新一轮全局模型；非最终轮返回 `status: running`、整数 `nextRound` 和下一轮完整 `updates[]`。
+10. 最终轮计算 MAE、RMSE、MAPE，生成模型版本号和模型哈希。
+11. 最终轮返回 `status: completed`、`nextRound: null`、`updates: []` 以及最终 `globalModelVersion`、`modelHash`、`metrics`。
+12. 将每轮结果返回 `api-gateway`，由网关继续执行下一轮 privacy secure-aggregate 或进入后续流程。
 
 ### 封装内容
 
@@ -1011,15 +1033,18 @@ Agent 报告页
 
 ### 功能与职责
 
-沉淀所有模块共享的数据结构、响应格式、错误码和工具函数。
+公共包只沉淀所有后端都必须以同一方式实现的最小协议能力，不承载任何模块业务。
 
 它负责：
 
-1. 定义统一响应结构。
-2. 定义通用错误码。
-3. 定义业务 ID 命名规则。
-4. 定义通用 DTO/Schema。
-5. 提供哈希、时间、签名等通用工具函数。
+1. 统一响应 `ApiResponse` 以及稳定的成功/失败构造。
+2. 冻结错误码、唯一稳定 message 和统一异常处理。
+3. 读取、生成和透传 `traceId`。
+4. 生成 UTC 时间。
+5. 冻结 ID：固定 14 个业务 ID 前缀并提供 ID 生成。
+6. 只提供跨服务基础 Schema：`HealthData`、`ErrorDetail`。
+
+模块专属 DTO、哈希、签名、加密及其他业务工具不属于公共包。哈希与签名归源端可信采集或相应业务模块；加密、联邦聚合、账本等能力也必须留在各自模块，禁止为了复用把业务实现移入 `packages/common`。
 
 ### 建议封装
 
@@ -1027,9 +1052,10 @@ Agent 报告页
 response.py
 errors.py
 schemas.py
-hashing.py
+tracing.py
 time_utils.py
 id_generator.py
+fastapi_support.py
 ```
 
 ## 14. 模块开发顺序
@@ -1213,4 +1239,3 @@ Mock 先串通链路，真实 FedAvg 证明核心能力，隐私计算增强展�
 ```text
 模块负责能力，api-gateway 负责编排，ledger-service 负责存证，web-dashboard 负责展示。
 ```
-

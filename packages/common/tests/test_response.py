@@ -1,6 +1,10 @@
 from datetime import datetime
+from inspect import signature
+
+import pytest
 
 from vpp_common.errors import ERROR_MESSAGES, ErrorCode, http_status_for
+from vpp_common.fastapi_support import ServiceError
 from vpp_common.response import failure, success
 from vpp_common.schemas import ErrorDetail
 
@@ -68,6 +72,25 @@ def test_failure_uses_catalog_message_and_details():
     assert response.details == [
         ErrorDetail(field="participants", reason="must not be empty")
     ]
+
+
+def test_response_builders_and_service_error_do_not_expose_message_override():
+    assert "message" not in signature(success).parameters
+    assert "message" not in signature(failure).parameters
+    assert "message" not in signature(ServiceError).parameters
+
+    with pytest.raises(TypeError):
+        success({}, message="caller controlled")
+    with pytest.raises(TypeError):
+        failure(ErrorCode.INVALID_REQUEST, message="caller controlled")
+    with pytest.raises(TypeError):
+        ServiceError(ErrorCode.INVALID_REQUEST, message="caller controlled")
+
+
+def test_every_error_code_has_one_stable_catalog_message():
+    assert len(set(ERROR_MESSAGES.values())) == len(ERROR_MESSAGES)
+    for code, message in ERROR_MESSAGES.items():
+        assert failure(code, trace_id="trace_existing").message == message
 
 
 def test_error_catalog_matches_frozen_document():

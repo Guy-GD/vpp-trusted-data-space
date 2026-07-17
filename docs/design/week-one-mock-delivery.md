@@ -136,25 +136,25 @@ web-dashboard
 6. 网关调用 `ledger-service` 记录资产事件。
 7. 网关创建并审批授权申请。
 8. 网关调用 `ledger-service` 记录授权事件。
-9. 网关创建并启动联邦训练任务。
-10. 网关取得当前轮次的模型更新摘要。
-11. 网关调用 `privacy-compute` 完成安全聚合。
-12. 网关将聚合结果交给 `federated-learning` 生成模型版本和指标。
-13. 网关记录训练、聚合和模型事件。
-14. 网关调用 `ai-agent` 完成预测、交易策略和审计报告。
-15. 网关记录 Agent 调用事件并返回完整汇总结果。
+9. 网关创建并启动联邦训练任务，取得第 1 轮 `currentRound` 与 `updates`。
+10. 每轮由网关先调用 `privacy-compute` 完成安全聚合，再将聚合结果交给 `federated-learning` 执行 FedAvg。
+11. 非最终轮按 FL 返回的 `nextRound` 与下一轮完整 `updates` 继续步骤 10；最终轮取得模型版本、哈希和指标。
+12. 网关记录每轮训练、聚合和最终模型事件。
+13. 网关调用 `ai-agent` 完成预测、交易策略和审计报告。
+14. 网关记录 Agent 调用事件并返回完整汇总结果。
 
-### 3.1 Day 1 必须消除的契约歧义
+### 3.1 已冻结决策与完成状态
 
-当前接口文档存在以下联调歧义，必须由技术负责人在 Day 1 中午前冻结并同步相关文档：
+以下联调决策已经冻结并同步到正式契约，完成状态为“已完成”；实现者不得再自行发明替代字段或调用方向：
 
-1. `main-flow.md` 中联邦学习服务直接调用隐私计算和账本的箭头，与网关统一编排原则不完全一致。第一周统一改为网关编排，业务服务不直接写账本。
-2. `POST /api/v1/fl/tasks/{taskId}/start` 的响应需要明确提供当前轮次的 `updates` 摘要，至少包含 `participantDid`、`sampleCount`、`modelUpdateUri` 和 `updateHash`。
-3. `POST /api/v1/fl/tasks/{taskId}/rounds/{roundId}/aggregate` 的请求需要明确接收 `aggregateId`、`aggregateResultUri` 和 `aggregateHash`。
-4. `POST /api/v1/data/ingest` 已返回 `assetId`；`POST /api/v1/data/assets` 定义为独立资产元信息登记接口，主流程只使用前者，后者仍需按契约实现。
-5. `POST /api/v1/demo/run` 的返回字段在各文档中必须统一包含 `businessId`、模型指标、Agent 结果标识、存证交易 ID 和 `traceId`。
+1. 第一周统一由网关编排；联邦学习服务不直接调用隐私计算或账本，其他业务服务也不直接写账本。
+2. `POST /api/v1/fl/tasks/{taskId}/start` 返回第 1 轮 `currentRound` 和完整 `updates`，更新项包含 `participantDid`、`sampleCount`、`modelUpdateUri`、`updateHash`。
+3. 每轮网关先调用 privacy secure-aggregate，再调用 FL aggregate。非最终轮返回 `status: running`、整数 `nextRound` 和下一轮完整 `updates`；最终轮返回 `status: completed`、`nextRound: null`、`updates: []` 及最终模型版本、哈希、指标。
+4. 更新提交与 FL aggregate 的 `taskId`、`roundId` 只来自路径；请求体不重复路径 ID。
+5. `POST /api/v1/data/ingest` 返回 `assetId`；`POST /api/v1/data/assets` 是独立资产元信息登记接口，不参与主流程。
+6. `POST /api/v1/demo/run` 的业务 `data` 统一包含 `businessId`、模型指标、Agent 结果标识和存证交易 ID；`traceId` 只存在于公共响应包络，并与响应头 `X-Trace-Id` 一致。
 
-文档未完成同步前，相关负责人可以搭建工程和测试骨架，但不得各自发明字段。
+上述完成状态由契约测试持续校验；任何后续变更仍须遵循第 10.2 节流程。
 
 ## 4. 人员分工
 

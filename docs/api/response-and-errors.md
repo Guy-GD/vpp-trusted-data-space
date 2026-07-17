@@ -10,14 +10,17 @@
 
 ## 2. 统一成功响应
 
-所有 HTTP 响应均使用以下包络：
+所有成功 HTTP 响应的实际 JSON 键集合固定为 `code`、`message`、`data`、`traceId`、`timestamp`，不得出现 `details` 或模块自定义根字段。
+
+成功响应示例：
 
 ```json
 {
   "code": 0,
   "message": "ok",
   "data": {},
-  "traceId": "trace_20260710_000001"
+  "traceId": "trace_20260710_000001",
+  "timestamp": "2026-07-10T02:00:00Z"
 }
 ```
 
@@ -27,16 +30,18 @@
 | `message` | string | 是 | 面向调用方的简短稳定说明。 |
 | `data` | object/array/null | 是 | 业务结果；无内容时固定为 `null`。 |
 | `traceId` | string | 是 | 请求链路追踪 ID；网关生成并向下游传递。 |
-| `requestId` | string | 否 | 服务内部请求 ID。 |
-| `timestamp` | string | 否 | ISO 8601 响应时间。 |
+| `timestamp` | string | 是 | UTC ISO 8601 响应时间。 |
 
 约定：
 
 1. 业务成功只返回 `code: 0`，不得用 HTTP 200 搭配非零 `code` 表示失败。
 2. `data` 结构由具体接口定义，不得把业务字段平铺到响应根部。
-3. `message` 不得包含密钥、明文电表数据、模型参数或内部堆栈。
+3. `message` 固定为 `ok`，`success()` 不提供公开覆盖参数。
+4. `message` 不得包含密钥、明文电表数据、模型参数或内部堆栈。
 
 ## 3. 统一错误响应
+
+失败响应示例：
 
 ```json
 {
@@ -44,6 +49,7 @@
   "message": "invalid request",
   "data": null,
   "traceId": "trace_20260710_000001",
+  "timestamp": "2026-07-10T02:00:00Z",
   "details": [
     { "field": "participants", "reason": "must not be empty" }
   ]
@@ -56,7 +62,10 @@
 | `message` | string | 是 | 稳定英文短语。 |
 | `data` | null | 是 | 错误时固定为 `null`。 |
 | `traceId` | string | 是 | 跨服务排查标识。 |
+| `timestamp` | string | 是 | UTC ISO 8601 响应时间。 |
 | `details` | array | 否 | 字段级校验或下游错误详情，不得泄露敏感数据。 |
+
+失败响应始终包含 `code`、`message`、`data: null`、`traceId`、`timestamp`。仅在存在字段级详情时返回 `details`；没有详情时实际 JSON 不得包含该键。`failure()` 与 `ServiceError` 的 `message` 始终来自下方冻结目录，不提供公开覆盖参数，也不得返回内部异常文本。
 
 ## 4. HTTP 状态码映射
 
@@ -75,6 +84,8 @@
 | `502` | 网关收到下游失败 | `50201`-`50203` |
 | `503` | 服务或依赖未就绪 | `50301`-`50303` |
 | `504` | 下游调用超时 | `50401` |
+
+标准 HTTP 异常必须保留原 HTTP 状态。上表中的已知状态映射到最接近的冻结业务码；其他 `4xx` 使用 `40001`，其他 `5xx` 使用 `50001`。异常响应只按不区分大小写的白名单透传 `Allow`、`WWW-Authenticate`、`Retry-After`，不得透传 Cookie、内部调试头或任意自定义头；异常 `detail` 不进入响应体。
 
 ## 5. 错误码目录
 
@@ -195,7 +206,8 @@ GET /health
   "code": 0,
   "message": "ok",
   "data": { "service": "service-name", "status": "healthy" },
-  "traceId": "trace_20260710_000001"
+  "traceId": "trace_20260710_000001",
+  "timestamp": "2026-07-10T02:00:00Z"
 }
 ```
 

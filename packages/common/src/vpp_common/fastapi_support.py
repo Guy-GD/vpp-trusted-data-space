@@ -1,4 +1,4 @@
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -29,6 +29,11 @@ _HTTP_STATUS_ERROR_CODES: dict[int, ErrorCode] = {
     503: ErrorCode.SERVICE_UNAVAILABLE,
     504: ErrorCode.DOWNSTREAM_TIMEOUT,
 }
+_FORWARDED_HTTP_HEADERS = {
+    "allow": "Allow",
+    "www-authenticate": "WWW-Authenticate",
+    "retry-after": "Retry-After",
+}
 
 
 class ServiceError(Exception):
@@ -36,32 +41,53 @@ class ServiceError(Exception):
         self,
         code: ErrorCode | int,
         *,
-        message: str | None = None,
         details: Sequence[ErrorDetail] | None = None,
     ) -> None:
         self.code = ErrorCode(code)
-        self.message = message or ERROR_MESSAGES[self.code]
+        self.message = ERROR_MESSAGES[self.code]
         self.details = list(details) if details else None
         super().__init__(self.message)
+
+
+def _error_code_for_http_status(status_code: int) -> ErrorCode:
+    if status_code in _HTTP_STATUS_ERROR_CODES:
+        return _HTTP_STATUS_ERROR_CODES[status_code]
+    if 400 <= status_code < 500:
+        return ErrorCode.INVALID_REQUEST
+    return ErrorCode.INTERNAL_ERROR
+
+
+def _filtered_http_headers(
+    headers: Mapping[str, str] | None,
+) -> dict[str, str]:
+    if not headers:
+        return {}
+    return {
+        _FORWARDED_HTTP_HEADERS[name.lower()]: value
+        for name, value in headers.items()
+        if name.lower() in _FORWARDED_HTTP_HEADERS
+    }
 
 
 def _json_error(
     code: ErrorCode,
     trace_id: str,
     *,
-    message: str | None = None,
     details: list[ErrorDetail] | None = None,
+    status_code: int | None = None,
+    headers: Mapping[str, str] | None = None,
 ) -> JSONResponse:
     body = failure(
         code,
         trace_id=trace_id,
-        message=message,
         details=details,
     )
+    response_headers = {TRACE_HEADER: trace_id}
+    response_headers.update(_filtered_http_headers(headers))
     return JSONResponse(
-        status_code=http_status_for(code),
+        status_code=status_code if status_code is not None else http_status_for(code),
         content=body.model_dump(exclude={"details"} if details is None else set()),
-        headers={TRACE_HEADER: trace_id},
+        headers=response_headers,
     )
 
 
@@ -85,7 +111,6 @@ def install_exception_handlers(app: FastAPI) -> None:
         return _json_error(
             exc.code,
             request.state.trace_id,
-            message=exc.message,
             details=exc.details,
         )
 
@@ -108,10 +133,12 @@ def install_exception_handlers(app: FastAPI) -> None:
     async def http_exception_handler(
         request: Request, exc: StarletteHTTPException
     ):
-        code = _HTTP_STATUS_ERROR_CODES.get(
-            exc.status_code, ErrorCode.INTERNAL_ERROR
+        return _json_error(
+            _error_code_for_http_status(exc.status_code),
+            request.state.trace_id,
+            status_code=exc.status_code,
+            headers=exc.headers,
         )
-        return _json_error(code, request.state.trace_id)
 
     @app.exception_handler(Exception)
     async def internal_error_handler(request: Request, exc: Exception):

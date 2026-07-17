@@ -29,6 +29,30 @@ STANDARD_HTTP_METHODS = {
     "TRACE",
     "CONNECT",
 }
+ENDPOINT_REQUIREMENT_MARKERS = (
+    "**请求说明**：",
+    "**字段类型与必填性**：",
+    "**成功说明**：",
+    "**可能错误**：",
+    "**幂等规则**：",
+)
+FORMAL_UTF8_FILES = (
+    "docs/api/openapi.md",
+    "docs/api/response-and-errors.md",
+    "docs/design/main-flow.md",
+    "docs/design/module-contracts.md",
+    "docs/design/week-one-mock-delivery.md",
+    "packages/common/README.md",
+    "packages/common/pyproject.toml",
+    "packages/common/src/vpp_common/__init__.py",
+    "packages/common/src/vpp_common/errors.py",
+    "packages/common/src/vpp_common/fastapi_support.py",
+    "packages/common/src/vpp_common/response.py",
+    "packages/common/src/vpp_common/schemas.py",
+    "packages/common/tests/test_fastapi_support.py",
+    "packages/common/tests/test_response.py",
+    "tests/integration/test_contract_docs.py",
+)
 
 
 def read(relative_path: str) -> str:
@@ -57,9 +81,9 @@ def endpoint_section(text: str, endpoint: str) -> str:
 
 def json_after_label(section: str, label: str) -> dict:
     match = re.search(
-        rf"{re.escape(label)}\n\n```json\n(.*?)\n```",
+        rf"^{re.escape(label)}\n\n```json\n(.*?)\n```",
         section,
-        flags=re.DOTALL,
+        flags=re.MULTILINE | re.DOTALL,
     )
     assert match, f"missing JSON example after {label!r}"
     return json.loads(match.group(1))
@@ -77,6 +101,14 @@ def external_interface_http_block(module_section: str) -> str:
 
 def parse_http_endpoints(http_block: str) -> list[tuple[str, str]]:
     return re.findall(r"^([A-Z]+) (\S+)$", http_block, re.MULTILINE)
+
+
+def coverage_matrix_rows(text: str) -> list[tuple[str, str, str]]:
+    return re.findall(
+        r"^\|\s*([^|]+?)\s*\|\s*([A-Z]+)\s*\|\s*`([^`]+)`\s*\|$",
+        numbered_section(text, 3),
+        flags=re.MULTILINE,
+    )
 
 
 def assert_required_fields(value: dict, fields: tuple[str, ...]) -> None:
@@ -141,6 +173,88 @@ def test_fl_aggregate_request_json_receives_privacy_result_before_fedavg():
     assert "FedAvg" in aggregate
 
 
+def test_fl_round_handoff_and_path_ids_are_frozen_in_openapi_json():
+    openapi = read("docs/api/openapi.md")
+    start = endpoint_section(openapi, "POST /api/v1/fl/tasks/{taskId}/start")
+    update = endpoint_section(
+        openapi,
+        "POST /api/v1/fl/tasks/{taskId}/rounds/{roundId}/updates",
+    )
+    aggregate = endpoint_section(
+        openapi,
+        "POST /api/v1/fl/tasks/{taskId}/rounds/{roundId}/aggregate",
+    )
+
+    start_data = json_after_label(start, "成功 `data`：")
+    update_request = json_after_label(update, "请求：")
+    aggregate_request = json_after_label(aggregate, "请求：")
+    running = json_after_label(aggregate, "非最终轮成功 `data`：")
+    completed = json_after_label(aggregate, "最终轮成功 `data`：")
+
+    assert "无请求体" in start
+    assert "`taskId` 仅来自路径" in start
+    assert start_data["currentRound"] == 1
+    assert start_data["updates"]
+    assert set(update_request) == {
+        "participantDid",
+        "sampleCount",
+        "modelUpdateUri",
+        "updateHash",
+    }
+    assert set(aggregate_request) == {
+        "aggregateId",
+        "aggregateResultUri",
+        "aggregateHash",
+    }
+    assert running["status"] == "running"
+    assert isinstance(running["nextRound"], int)
+    assert running["updates"]
+    assert_required_fields(
+        running["updates"][0],
+        ("participantDid", "sampleCount", "modelUpdateUri", "updateHash"),
+    )
+    assert completed["status"] == "completed"
+    assert completed["nextRound"] is None
+    assert completed["updates"] == []
+    assert_required_fields(
+        completed,
+        ("globalModelVersion", "modelHash", "metrics"),
+    )
+
+
+def test_fl_round_handoff_is_synchronized_across_design_documents():
+    flow = numbered_section(read("docs/design/main-flow.md"), 4)
+    contracts = numbered_section(read("docs/design/module-contracts.md"), 8)
+
+    update_request = json_after_label(contracts, "本地参数上传请求：")
+    aggregate_request = json_after_label(contracts, "FedAvg 聚合请求：")
+    running = json_after_label(contracts, "非最终轮聚合输出：")
+    completed = json_after_label(contracts, "最终轮聚合输出：")
+
+    assert "每轮" in flow
+    assert "status: running" in flow
+    assert "nextRound" in flow
+    assert "status: completed" in flow
+    assert "nextRound: null" in flow
+    assert set(update_request) == {
+        "participantDid",
+        "sampleCount",
+        "modelUpdateUri",
+        "updateHash",
+    }
+    assert set(aggregate_request) == {
+        "aggregateId",
+        "aggregateResultUri",
+        "aggregateHash",
+    }
+    assert running["status"] == "running"
+    assert isinstance(running["nextRound"], int)
+    assert running["updates"]
+    assert completed["status"] == "completed"
+    assert completed["nextRound"] is None
+    assert completed["updates"] == []
+
+
 def test_data_ingest_is_the_main_flow_while_asset_registration_stays_separate():
     openapi = read("docs/api/openapi.md")
     flow = read("docs/design/main-flow.md")
@@ -182,6 +296,30 @@ def test_demo_data_json_and_module_contract_example_exclude_common_envelope():
     assert "response-and-errors.md" in contracts
 
 
+def test_key_demo_and_agent_examples_are_parseable_json():
+    openapi = read("docs/api/openapi.md")
+    demo = endpoint_section(openapi, "POST /api/v1/demo/run")
+    predict = endpoint_section(openapi, "POST /api/v1/agent/predict")
+    strategy = endpoint_section(openapi, "POST /api/v1/agent/trading-strategy")
+    question = endpoint_section(openapi, "POST /api/v1/agent/audit-question")
+    report = endpoint_section(openapi, "POST /api/v1/agent/audit-report")
+
+    examples = (
+        json_after_label(demo, "请求："),
+        json_after_label(demo, "成功 `data`："),
+        json_after_label(predict, "请求："),
+        json_after_label(predict, "成功 `data`："),
+        json_after_label(strategy, "请求："),
+        json_after_label(strategy, "成功 `data`："),
+        json_after_label(question, "请求："),
+        json_after_label(question, "成功 `data`："),
+        json_after_label(report, "请求："),
+        json_after_label(report, "成功 `data`："),
+    )
+
+    assert all(isinstance(example, dict) and example for example in examples)
+
+
 def test_agent_audit_request_json_uses_gateway_supplied_ledger_evidence():
     openapi = read("docs/api/openapi.md")
     flow = read("docs/design/main-flow.md")
@@ -213,15 +351,49 @@ def test_http_endpoint_parser_accepts_all_standard_methods():
     assert {method for method, _ in parse_http_endpoints(block)} == STANDARD_HTTP_METHODS
 
 
+def test_openapi_matrix_and_endpoint_h3_sections_match_bidirectionally():
+    openapi = read("docs/api/openapi.md")
+    matrix_rows = coverage_matrix_rows(openapi)
+    matrix_endpoints = {(method, path) for _, method, path in matrix_rows}
+    h3_endpoints = re.findall(
+        r"^### `([A-Z]+) ([^`]+)`$",
+        openapi,
+        flags=re.MULTILINE,
+    )
+
+    assert len(h3_endpoints) == len(set(h3_endpoints))
+    assert set(h3_endpoints) == matrix_endpoints
+
+
+def test_every_openapi_endpoint_has_complete_implementation_contract():
+    openapi = read("docs/api/openapi.md")
+    for _, method, path in coverage_matrix_rows(openapi):
+        endpoint = f"{method} {path}"
+        section = endpoint_section(openapi, endpoint)
+        for marker in ENDPOINT_REQUIREMENT_MARKERS:
+            assert marker in section, f"{endpoint} missing {marker}"
+        fields = re.search(
+            r"^\*\*字段类型与必填性\*\*：(.*)$",
+            section,
+            flags=re.MULTILINE,
+        )
+        assert fields
+        assert "必填" in fields.group(1) or "无请求字段" in fields.group(1)
+        assert "请求体" in section
+        assert re.search(r"^\*\*成功说明\*\*：.*`data`", section, re.MULTILINE)
+        if method == "GET":
+            assert "无请求体" in section, f"{endpoint} must declare no request body"
+            assert "不适用" in section, f"{endpoint} must declare idempotency inapplicable"
+        else:
+            assert "Idempotency-Key" in section, f"{endpoint} missing write idempotency rule"
+        assert "response-and-errors.md" in section, f"{endpoint} must reference common errors"
+
+
 def test_openapi_coverage_matrix_matches_each_backend_external_interface():
     openapi = read("docs/api/openapi.md")
     contracts = read("docs/design/module-contracts.md")
     matrix = numbered_section(openapi, 3)
-    matrix_rows = re.findall(
-        r"^\|\s*([^|]+?)\s*\|\s*([A-Z]+)\s*\|\s*`([^`]+)`\s*\|$",
-        matrix,
-        flags=re.MULTILINE,
-    )
+    matrix_rows = coverage_matrix_rows(openapi)
     matrix_modules = {module for module, _, _ in matrix_rows}
     expected_modules = BACKEND_MODULES | {"所有服务"}
 
@@ -253,3 +425,72 @@ def test_openapi_coverage_matrix_matches_each_backend_external_interface():
             for matrix_module, method, path in matrix_rows
             if matrix_module == module
         } | {("GET", "/health")}
+
+
+def test_public_response_document_matches_actual_frozen_key_sets():
+    response_doc = read("docs/api/response-and-errors.md")
+    success_section = numbered_section(response_doc, 2)
+    failure_section = numbered_section(response_doc, 3)
+    success_example = json_after_label(success_section, "成功响应示例：")
+    failure_example = json_after_label(failure_section, "失败响应示例：")
+
+    assert "requestId" not in response_doc
+    assert set(success_example) == {
+        "code",
+        "message",
+        "data",
+        "traceId",
+        "timestamp",
+    }
+    assert set(failure_example) == {
+        "code",
+        "message",
+        "data",
+        "traceId",
+        "timestamp",
+        "details",
+    }
+    assert re.search(r"\| `timestamp` \| string \| 是 \|", success_section)
+    assert "仅在存在字段级详情时返回 `details`" in failure_section
+
+
+def test_common_package_contract_excludes_module_specific_and_security_helpers():
+    common = numbered_section(read("docs/design/module-contracts.md"), 13)
+
+    for responsibility in (
+        "统一响应",
+        "错误码",
+        "traceId",
+        "UTC 时间",
+        "冻结 ID",
+        "HealthData",
+        "ErrorDetail",
+    ):
+        assert responsibility in common
+    for excluded in ("模块专属 DTO", "哈希", "签名", "加密", "业务工具"):
+        assert excluded in common
+    assert "不属于公共包" in common
+    assert "源端可信采集" in common
+    assert "hashing.py" not in common
+    assert "通用 DTO/Schema" not in common
+
+
+def test_week_one_contract_ambiguities_are_recorded_as_completed_decisions():
+    week_one = read("docs/design/week-one-mock-delivery.md")
+
+    assert "### 3.1 已冻结决策与完成状态" in week_one
+    assert "Day 1 必须消除的契约歧义" not in week_one
+    assert "当前接口文档存在以下联调歧义" not in week_one
+    assert "`traceId` 只存在于公共响应包络" in week_one
+
+
+def test_formal_files_are_utf8_without_bom_and_repository_freezes_lf():
+    attributes = ROOT / ".gitattributes"
+    assert attributes.exists(), "missing .gitattributes"
+    attributes_text = attributes.read_text(encoding="utf-8")
+    assert "* text=auto eol=lf" in attributes_text
+
+    for relative_path in FORMAL_UTF8_FILES + (".gitattributes",):
+        raw = (ROOT / relative_path).read_bytes()
+        assert not raw.startswith(b"\xef\xbb\xbf"), f"UTF-8 BOM: {relative_path}"
+        raw.decode("utf-8", errors="strict")
