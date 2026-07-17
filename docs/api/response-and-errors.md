@@ -4,7 +4,7 @@
 
 ## 1. 适用范围
 
-适用于 `api-gateway`、`meter-simulator`、`data-ingestion`、`identity-did`、`federated-learning`、`privacy-compute`、`ledger-service`、`ai-agent` 的所有业务接口和 `GET /health`。
+适用于 `api-gateway`、`meter-simulator`、`data-ingestion`、`identity-did`、`federated-learning`、`privacy-compute`、`ledger-service`、`ai-agent` 的所有业务接口和 `GET /health`。八个后端统一安装 `packages/common`，不得复制或自行修改响应、错误码、追踪和 ID 生成实现。
 
 接口路径、请求字段和模块边界以 `docs/api/openapi.md` 与 `docs/design/module-contracts.md` 为准；本文件只定义跨模块通用规则。
 
@@ -147,13 +147,42 @@
 | Header | 约定 |
 |---|---|
 | `Content-Type` | JSON 请求固定为 `application/json`。 |
-| `X-Trace-Id` | 网关接收或生成追踪 ID；下游沿用。 |
+| `X-Trace-Id` | 网关保留合法入站值，否则生成 `trace_` 前缀 ID；下游、响应头和响应体沿用同一个值。 |
 | `Idempotency-Key` | 创建批次、资产、授权、训练任务、聚合和存证等写操作建议传入。 |
 | `X-Caller-Did` | 服务间调用时传入调用方 DID；与请求体 DID 不一致时返回 `40102`。 |
 
 幂等规则：相同 Key 重试返回首次结果；相同 Key 但请求体不同返回 HTTP `409`、业务码 `40901`；超时后不得生成新 Key 造成重复业务。
 
-## 7. 健康检查
+### 6.1 `traceId` 冻结规则
+
+1. 合法值必须以 `trace_` 开头，只包含英文字母、数字、点、下划线、冒号或连字符，总长度不超过 128 个字符。
+2. `api-gateway` 收到合法的 `X-Trace-Id` 时原样保留；缺失或非法时生成新值。
+3. 网关调用所有下游时必须传递同一个 `X-Trace-Id`；业务服务不得为同一请求重新生成追踪 ID。
+4. 每个服务的响应头 `X-Trace-Id` 与响应体 `traceId` 必须相同，结构化日志也必须记录该值。
+5. `traceId` 只用于链路排查，不承载 DID、业务 ID、密钥、令牌或其他敏感内容。
+
+## 7. 统一 ID 前缀
+
+| 前缀 | 资源 |
+|---|---|
+| `demo_` | 一键演示业务 |
+| `batch_` | 电表读数批次 |
+| `reading_` | 单条电表读数 |
+| `asset_` | 数据资产 |
+| `auth_` | 授权申请 |
+| `fl_task_` | 联邦训练任务 |
+| `aggregate_` | 隐私聚合结果 |
+| `global_model_v` | 全局模型版本 |
+| `prediction_` | 预测结果 |
+| `strategy_` | 交易策略 |
+| `report_` | 审计报告 |
+| `evt_` | 存证事件 |
+| `tx_` | 存证交易 |
+| `trace_` | 链路追踪 |
+
+创建资源时统一调用 `vpp_common.new_id(prefix)`；未知前缀必须拒绝。ID 是不透明字符串，调用方不得依赖后缀长度、排序或数值连续性。
+
+## 8. 健康检查
 
 ```http
 GET /health
