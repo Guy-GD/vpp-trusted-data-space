@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from pydantic import BaseModel
 
@@ -34,6 +34,10 @@ def build_app() -> FastAPI:
     @app.get("/internal-error")
     def internal_error():
         raise RuntimeError("secret implementation detail")
+
+    @app.get("/http-not-found")
+    def http_not_found():
+        raise HTTPException(status_code=404, detail="secret HTTP exception detail")
 
     return app
 
@@ -78,3 +82,18 @@ def test_internal_error_does_not_leak_exception_message():
     assert response.json()["code"] == 50001
     assert response.json()["message"] == "internal error"
     assert "secret implementation detail" not in response.text
+
+
+def test_http_not_found_is_normalized_without_detail_leakage():
+    client = TestClient(build_app())
+    response = client.get(
+        "/http-not-found", headers={"X-Trace-Id": "trace_existing"}
+    )
+
+    assert response.status_code == 404
+    assert response.json()["code"] == 40401
+    assert response.json()["data"] is None
+    assert response.json()["traceId"] == "trace_existing"
+    assert response.headers["X-Trace-Id"] == "trace_existing"
+    assert "detail" not in response.json()
+    assert "secret HTTP exception detail" not in response.text

@@ -3,6 +3,7 @@ from collections.abc import Sequence
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from .errors import ERROR_MESSAGES, ErrorCode, http_status_for
 from .response import failure
@@ -13,6 +14,21 @@ from .tracing import (
     resolve_trace_id,
     set_current_trace_id,
 )
+
+
+_HTTP_STATUS_ERROR_CODES: dict[int, ErrorCode] = {
+    400: ErrorCode.INVALID_REQUEST,
+    401: ErrorCode.MISSING_IDENTITY,
+    403: ErrorCode.ACCESS_DENIED,
+    404: ErrorCode.RESOURCE_NOT_FOUND,
+    409: ErrorCode.IDEMPOTENCY_CONFLICT,
+    422: ErrorCode.PARTICIPANTS_NOT_READY,
+    429: ErrorCode.RATE_LIMIT_EXCEEDED,
+    500: ErrorCode.INTERNAL_ERROR,
+    502: ErrorCode.DOWNSTREAM_REJECTED,
+    503: ErrorCode.SERVICE_UNAVAILABLE,
+    504: ErrorCode.DOWNSTREAM_TIMEOUT,
+}
 
 
 class ServiceError(Exception):
@@ -87,6 +103,15 @@ def install_exception_handlers(app: FastAPI) -> None:
             request.state.trace_id,
             details=details,
         )
+
+    @app.exception_handler(StarletteHTTPException)
+    async def http_exception_handler(
+        request: Request, exc: StarletteHTTPException
+    ):
+        code = _HTTP_STATUS_ERROR_CODES.get(
+            exc.status_code, ErrorCode.INTERNAL_ERROR
+        )
+        return _json_error(code, request.state.trace_id)
 
     @app.exception_handler(Exception)
     async def internal_error_handler(request: Request, exc: Exception):
