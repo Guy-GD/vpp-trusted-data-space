@@ -1,5 +1,7 @@
+import copy
 import re
 from threading import RLock
+from typing import Any, Callable
 
 from vpp_common import utc_now_iso
 
@@ -88,6 +90,27 @@ class InMemoryRepository:
             )
             self.devices[device_did] = record
             return record
+
+    def execute_idempotent(
+        self,
+        *,
+        key: str,
+        fingerprint: str,
+        action: Callable[[], dict[str, Any]],
+    ) -> dict[str, Any] | None:
+        with self._lock:
+            stored = self.idempotency.get(key)
+            if stored is not None:
+                if stored.fingerprint != fingerprint:
+                    return None
+                return copy.deepcopy(stored.data)
+
+            data = action()
+            self.idempotency[key] = StoredResult(
+                fingerprint=fingerprint,
+                data=copy.deepcopy(data),
+            )
+            return data
 
     def _next_did(self, identity_type: str, counters: dict[str, int]) -> str:
         slug = self.slug(identity_type)

@@ -1,12 +1,23 @@
-from typing import Any
+import base64
+import hashlib
+import hmac
+import json
+import re
+from typing import Any, Callable
 
 from vpp_common import ErrorCode, ServiceError
 
 from .repository import InMemoryRepository
 from .schemas import (
     DeviceCreateRequest,
+    DeviceRecord,
+    IdentityVerifyRequest,
     SubjectCreateRequest,
+    SubjectRecord,
 )
+
+
+PAYLOAD_HASH_PATTERN = re.compile(r"^sha256:[0-9a-fA-F]{64}$")
 
 
 class IdentityService:
@@ -35,3 +46,72 @@ class IdentityService:
         return record.model_dump(
             include={"deviceDid", "ownerDid", "status", "createdAt"}
         )
+
+    def get_identity(self, did: str) -> SubjectRecord | DeviceRecord | None:
+        return self.repository.subjects.get(did) or self.repository.devices.get(did)
+
+    @staticmethod
+    def make_mock_signature(public_key: str, payload_hash: str) -> str:
+        digest = hashlib.sha256(
+            f"{public_key}:{payload_hash}".encode("utf-8")
+        ).digest()
+        return base64.b64encode(digest).decode("ascii")
+
+    def verify_identity(self, request: IdentityVerifyRequest) -> dict[str, Any]:
+        did = request.subject_did or request.device_did
+        assert did is not None
+        identity = self.get_identity(did)
+        if identity is None or identity.status != "active":
+            raise ServiceError(ErrorCode.INVALID_DID)
+        if PAYLOAD_HASH_PATTERN.fullmatch(request.payload_hash) is None:
+            raise ServiceError(ErrorCode.INVALID_HASH)
+
+        expected = self.make_mock_signature(identity.publicKey, request.payload_hash)
+        if not hmac.compare_digest(request.signature, expected):
+            raise ServiceError(ErrorCode.INVALID_SIGNATURE)
+
+        subject_type = (
+            identity.type
+            if isinstance(identity, SubjectRecord)
+            else identity.deviceType
+        )
+        return {
+            "valid": True,
+            "did": did,
+            "subjectType": subject_type,
+        }
+
+
+class IdempotencyService:
+    def __init__(self, repository: InMemoryRepository) -> None:
+        self.repository = repository
+
+    def execute(
+        self,
+        key: str | None,
+        operation: str,
+        payload: dict[str, Any],
+        action: Callable[[], dict[str, Any]],
+    ) -> dict[str, Any]:
+        if key is None:
+            return action()
+
+        fingerprint = self._fingerprint(operation, payload)
+        data = self.repository.execute_idempotent(
+            key=key,
+            fingerprint=fingerprint,
+            action=action,
+        )
+        if data is None:
+            raise ServiceError(ErrorCode.IDEMPOTENCY_CONFLICT)
+        return data
+
+    @staticmethod
+    def _fingerprint(operation: str, payload: dict[str, Any]) -> str:
+        canonical = json.dumps(
+            payload,
+            sort_keys=True,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        return hashlib.sha256(f"{operation}:{canonical}".encode("utf-8")).hexdigest()

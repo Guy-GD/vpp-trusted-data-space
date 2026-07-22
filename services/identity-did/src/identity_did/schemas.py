@@ -1,6 +1,12 @@
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    model_validator,
+)
 
 
 NonEmptyString = Annotated[
@@ -32,6 +38,19 @@ class DeviceCreateRequest(RequestSchema):
     device_type: SlugSource = Field(alias="deviceType")
     owner_did: NonEmptyString = Field(alias="ownerDid")
     public_key: NonEmptyString = Field(alias="publicKey")
+
+
+class IdentityVerifyRequest(RequestSchema):
+    subject_did: NonEmptyString | None = Field(default=None, alias="subjectDid")
+    device_did: NonEmptyString | None = Field(default=None, alias="deviceDid")
+    signature: NonEmptyString
+    payload_hash: NonEmptyString = Field(alias="payloadHash")
+
+    @model_validator(mode="after")
+    def require_exactly_one_did(self) -> "IdentityVerifyRequest":
+        if (self.subject_did is None) == (self.device_did is None):
+            raise ValueError("exactly one of subjectDid or deviceDid is required")
+        return self
 
 
 class StoredRecord(BaseModel):
