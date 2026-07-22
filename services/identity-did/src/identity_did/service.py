@@ -1,13 +1,11 @@
 from typing import Any
 
-from vpp_common import ErrorCode, ServiceError, utc_now_iso
+from vpp_common import ErrorCode, ServiceError
 
 from .repository import InMemoryRepository
 from .schemas import (
     DeviceCreateRequest,
-    DeviceRecord,
     SubjectCreateRequest,
-    SubjectRecord,
 )
 
 
@@ -16,36 +14,24 @@ class IdentityService:
         self.repository = repository
 
     def register_subject(self, request: SubjectCreateRequest) -> dict[str, Any]:
-        subject_did = self.repository.next_subject_did(request.type)
-        record = SubjectRecord(
-            subjectDid=subject_did,
+        record = self.repository.create_subject(
             name=request.name,
-            type=request.type,
-            publicKey=request.public_key,
-            status="active",
-            createdAt=utc_now_iso(),
+            subject_type=request.type,
+            public_key=request.public_key,
         )
-        self.repository.subjects[subject_did] = record
         return record.model_dump(
             include={"subjectDid", "name", "type", "status", "createdAt"}
         )
 
     def register_device(self, request: DeviceCreateRequest) -> dict[str, Any]:
-        owner = self.repository.subjects.get(request.owner_did)
-        if owner is None or owner.status != "active":
-            raise ServiceError(ErrorCode.INVALID_DID)
-
-        device_did = self.repository.next_device_did(request.device_type)
-        record = DeviceRecord(
-            deviceDid=device_did,
-            deviceName=request.device_name,
-            deviceType=request.device_type,
-            ownerDid=request.owner_did,
-            publicKey=request.public_key,
-            status="active",
-            createdAt=utc_now_iso(),
+        record = self.repository.create_device(
+            device_name=request.device_name,
+            device_type=request.device_type,
+            owner_did=request.owner_did,
+            public_key=request.public_key,
         )
-        self.repository.devices[device_did] = record
+        if record is None:
+            raise ServiceError(ErrorCode.INVALID_DID)
         return record.model_dump(
             include={"deviceDid", "ownerDid", "status", "createdAt"}
         )

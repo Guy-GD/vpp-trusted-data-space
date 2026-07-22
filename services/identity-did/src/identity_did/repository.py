@@ -1,4 +1,5 @@
 import re
+from threading import RLock
 
 from vpp_common import utc_now_iso
 
@@ -35,17 +36,58 @@ class InMemoryRepository:
         self.idempotency: dict[str, StoredResult] = {}
         self._subject_counters: dict[str, int] = {}
         self._device_counters: dict[str, int] = {}
+        self._lock = RLock()
         self._seed_demo_subjects()
 
     @staticmethod
     def slug(value: str) -> str:
         return re.sub(r"[^a-z0-9]+", "-", value.strip().lower()).strip("-")
 
-    def next_subject_did(self, subject_type: str) -> str:
-        return self._next_did(subject_type, self._subject_counters)
+    def create_subject(
+        self,
+        *,
+        name: str,
+        subject_type: str,
+        public_key: str,
+    ) -> SubjectRecord:
+        with self._lock:
+            subject_did = self._next_did(subject_type, self._subject_counters)
+            record = SubjectRecord(
+                subjectDid=subject_did,
+                name=name,
+                type=subject_type,
+                publicKey=public_key,
+                status="active",
+                createdAt=utc_now_iso(),
+            )
+            self.subjects[subject_did] = record
+            return record
 
-    def next_device_did(self, device_type: str) -> str:
-        return self._next_did(device_type, self._device_counters)
+    def create_device(
+        self,
+        *,
+        device_name: str,
+        device_type: str,
+        owner_did: str,
+        public_key: str,
+    ) -> DeviceRecord | None:
+        with self._lock:
+            owner = self.subjects.get(owner_did)
+            if owner is None or owner.status != "active":
+                return None
+
+            device_did = self._next_did(device_type, self._device_counters)
+            record = DeviceRecord(
+                deviceDid=device_did,
+                deviceName=device_name,
+                deviceType=device_type,
+                ownerDid=owner_did,
+                publicKey=public_key,
+                status="active",
+                createdAt=utc_now_iso(),
+            )
+            self.devices[device_did] = record
+            return record
 
     def _next_did(self, identity_type: str, counters: dict[str, int]) -> str:
         slug = self.slug(identity_type)

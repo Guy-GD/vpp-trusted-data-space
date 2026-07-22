@@ -1,23 +1,37 @@
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+
+
+NonEmptyString = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, min_length=1),
+]
+SlugSource = Annotated[
+    str,
+    StringConstraints(
+        strip_whitespace=True,
+        min_length=1,
+        pattern=r"^[A-Za-z0-9]+(?:[ _-]+[A-Za-z0-9]+)*$",
+    ),
+]
 
 
 class RequestSchema(BaseModel):
-    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+    model_config = ConfigDict(populate_by_name=False, extra="forbid")
 
 
 class SubjectCreateRequest(RequestSchema):
-    name: str = Field(min_length=1)
-    type: str = Field(min_length=1)
-    public_key: str = Field(alias="publicKey", min_length=1)
+    name: NonEmptyString
+    type: SlugSource
+    public_key: NonEmptyString = Field(alias="publicKey")
 
 
 class DeviceCreateRequest(RequestSchema):
-    device_name: str = Field(alias="deviceName", min_length=1)
-    device_type: str = Field(alias="deviceType", min_length=1)
-    owner_did: str = Field(alias="ownerDid", min_length=1)
-    public_key: str = Field(alias="publicKey", min_length=1)
+    device_name: NonEmptyString = Field(alias="deviceName")
+    device_type: SlugSource = Field(alias="deviceType")
+    owner_did: NonEmptyString = Field(alias="ownerDid")
+    public_key: NonEmptyString = Field(alias="publicKey")
 
 
 class StoredRecord(BaseModel):
