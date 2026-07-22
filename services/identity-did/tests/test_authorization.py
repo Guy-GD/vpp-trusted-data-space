@@ -102,6 +102,19 @@ def test_create_authorization_rejects_past_or_naive_expiry(
     assert response.json()["code"] == 40003
 
 
+def test_create_authorization_rejects_numeric_expiry(
+    client: TestClient,
+    future_expiry: str,
+) -> None:
+    payload: dict[str, object] = authorization_payload(future_expiry)
+    payload["expireAt"] = 2524608000
+
+    response = client.post("/api/v1/auth/requests", json=payload)
+
+    assert response.status_code == 400
+    assert response.json()["code"] == 40001
+
+
 def test_authorization_idempotency_replays_data_with_current_trace(
     client: TestClient,
     repository: InMemoryRepository,

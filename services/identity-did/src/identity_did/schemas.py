@@ -6,6 +6,7 @@ from pydantic import (
     ConfigDict,
     Field,
     StringConstraints,
+    field_validator,
     model_validator,
 )
 
@@ -60,6 +61,13 @@ class AuthorizationCreateRequest(RequestSchema):
     asset_id: NonEmptyString = Field(alias="assetId")
     purpose: NonEmptyString
     expire_at: datetime = Field(alias="expireAt")
+
+    @field_validator("expire_at", mode="before")
+    @classmethod
+    def require_string_expiry(cls, value: Any) -> Any:
+        if not isinstance(value, str):
+            raise ValueError("expireAt must be a date-time string")
+        return value
 
 
 class StoredRecord(BaseModel):
