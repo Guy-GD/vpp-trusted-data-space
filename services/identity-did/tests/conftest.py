@@ -5,11 +5,17 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from identity_did.main import create_app
+from identity_did.repository import InMemoryRepository
 
 
 @pytest.fixture
-def app() -> FastAPI:
-    return create_app()
+def repository() -> InMemoryRepository:
+    return InMemoryRepository()
+
+
+@pytest.fixture
+def app(repository: InMemoryRepository) -> FastAPI:
+    return create_app(repository)
 
 
 @pytest.fixture
