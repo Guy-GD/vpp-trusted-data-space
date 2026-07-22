@@ -70,6 +70,12 @@ class AuthorizationCreateRequest(RequestSchema):
         return value
 
 
+class AuthorizationDecisionRequest(RequestSchema):
+    approver_did: NonEmptyString = Field(alias="approverDid")
+    decision: Literal["approved", "rejected"]
+    reason: NonEmptyString | None = None
+
+
 class StoredRecord(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

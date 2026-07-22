@@ -26,6 +26,33 @@ def authorization_payload(expire_at: str) -> dict[str, str]:
     }
 
 
+def decision_payload(
+    decision: str = "approved",
+    reason: str | None = None,
+    approver_did: str = OWNER_DID,
+) -> dict[str, str | None]:
+    return {
+        "approverDid": approver_did,
+        "decision": decision,
+        "reason": reason,
+    }
+
+
+def create_authorization(
+    client: TestClient,
+    expire_at: str,
+    *,
+    key: str,
+) -> dict[str, Any]:
+    response = client.post(
+        "/api/v1/auth/requests",
+        json=authorization_payload(expire_at),
+        headers={"Idempotency-Key": key},
+    )
+    assert response.status_code == 200
+    return response.json()["data"]
+
+
 def assert_utc_timestamp(value: str) -> datetime:
     parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     assert parsed.utcoffset() == timedelta(0)
@@ -411,3 +438,216 @@ def test_create_authorization_rejects_blank_or_non_camel_case_fields(
 
     assert response.status_code == 400
     assert response.json()["code"] == 40001
+
+
+def test_owner_approves_requested_authorization(
+    client: TestClient,
+    future_expiry: str,
+) -> None:
+    created = create_authorization(client, future_expiry, key="auth-approve-flow")
+
+    response = client.post(
+        f"/api/v1/auth/requests/{created['authId']}/approve",
+        json=decision_payload(),
+        headers={"Idempotency-Key": "approve-flow"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["status"] == "approved"
+    assert data["decision"] == "approved"
+    assert data["reason"] is None
+    assert data["approverDid"] == OWNER_DID
+    assert data["approvedAt"].endswith("Z")
+    assert_utc_timestamp(data["approvedAt"])
+
+    queried = client.get(f"/api/v1/auth/requests/{created['authId']}")
+    assert queried.status_code == 200
+    assert queried.json()["data"] == data
+
+
+def test_owner_rejects_requested_authorization_with_reason(
+    client: TestClient,
+    future_expiry: str,
+) -> None:
+    created = create_authorization(client, future_expiry, key="auth-reject-flow")
+
+    response = client.post(
+        f"/api/v1/auth/requests/{created['authId']}/approve",
+        json=decision_payload("rejected", "purpose not permitted"),
+    )
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["status"] == "rejected"
+    assert data["decision"] == "rejected"
+    assert data["reason"] == "purpose not permitted"
+    assert data["approverDid"] == OWNER_DID
+    assert data["approvedAt"].endswith("Z")
+
+
+def test_unknown_authorization_returns_40401(client: TestClient) -> None:
+    approve = client.post(
+        "/api/v1/auth/requests/auth_missing/approve",
+        json=decision_payload(),
+    )
+    query = client.get("/api/v1/auth/requests/auth_missing")
+
+    for response in (approve, query):
+        assert response.status_code == 404
+        assert response.json()["code"] == 40401
+
+
+def test_non_owner_cannot_decide_authorization(
+    client: TestClient,
+    future_expiry: str,
+) -> None:
+    created = create_authorization(client, future_expiry, key="auth-wrong-owner")
+
+    response = client.post(
+        f"/api/v1/auth/requests/{created['authId']}/approve",
+        json=decision_payload(approver_did=REQUESTER_DID),
+    )
+
+    assert response.status_code == 403
+    assert response.json()["code"] == 40301
+
+
+def test_approval_rejects_mismatched_caller_header(
+    client: TestClient,
+    future_expiry: str,
+) -> None:
+    created = create_authorization(client, future_expiry, key="auth-approval-caller")
+
+    response = client.post(
+        f"/api/v1/auth/requests/{created['authId']}/approve",
+        json=decision_payload(),
+        headers={"X-Caller-Did": REQUESTER_DID},
+    )
+
+    assert response.status_code == 401
+    assert response.json()["code"] == 40102
+
+
+def test_decided_authorization_rejects_second_decision(
+    client: TestClient,
+    future_expiry: str,
+) -> None:
+    created = create_authorization(client, future_expiry, key="auth-duplicate")
+    endpoint = f"/api/v1/auth/requests/{created['authId']}/approve"
+    first = client.post(endpoint, json=decision_payload())
+    second = client.post(endpoint, json=decision_payload("rejected"))
+
+    assert first.status_code == 200
+    assert second.status_code == 409
+    assert second.json()["code"] == 40902
+
+
+def test_approval_idempotency_replays_data_with_fresh_trace(
+    client: TestClient,
+    future_expiry: str,
+) -> None:
+    created = create_authorization(client, future_expiry, key="auth-approve-replay")
+    endpoint = f"/api/v1/auth/requests/{created['authId']}/approve"
+    payload = decision_payload(reason="approved for demo")
+    first = client.post(
+        endpoint,
+        json=payload,
+        headers={
+            "Idempotency-Key": "approval-replay",
+            "X-Trace-Id": "trace_approval_1",
+        },
+    )
+    second = client.post(
+        endpoint,
+        json=payload,
+        headers={
+            "Idempotency-Key": "approval-replay",
+            "X-Trace-Id": "trace_approval_2",
+        },
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert second.json()["data"] == first.json()["data"]
+    assert second.json()["traceId"] == "trace_approval_2"
+    assert second.headers["X-Trace-Id"] == "trace_approval_2"
+
+
+def test_approval_rejects_blank_idempotency_key(
+    client: TestClient,
+    future_expiry: str,
+) -> None:
+    created = create_authorization(client, future_expiry, key="auth-blank-key")
+
+    response = client.post(
+        f"/api/v1/auth/requests/{created['authId']}/approve",
+        json=decision_payload(),
+        headers={"Idempotency-Key": "   "},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["code"] == 40001
+
+
+def test_approved_authorization_expires_on_query_and_stays_expired(
+    client: TestClient,
+    repository: InMemoryRepository,
+    clock: Any,
+) -> None:
+    expire_at = (clock.now() + timedelta(hours=1)).isoformat()
+    created = create_authorization(client, expire_at, key="auth-expiry")
+    endpoint = f"/api/v1/auth/requests/{created['authId']}"
+    approved = client.post(
+        f"{endpoint}/approve",
+        json=decision_payload(),
+    )
+    assert approved.status_code == 200
+
+    clock.advance(timedelta(hours=2))
+    queried = client.get(endpoint)
+
+    assert queried.status_code == 403
+    assert queried.json()["code"] == 40303
+    stored = repository.get_authorization(created["authId"])
+    assert stored is not None
+    assert stored.status == "expired"
+
+    decided_again = client.post(
+        f"{endpoint}/approve",
+        json=decision_payload(),
+    )
+    assert decided_again.status_code == 403
+    assert decided_again.json()["code"] == 40303
+
+
+def test_concurrent_decisions_allow_at_most_one_success(
+    client: TestClient,
+    repository: InMemoryRepository,
+    future_expiry: str,
+) -> None:
+    created = create_authorization(client, future_expiry, key="auth-race")
+    endpoint = f"/api/v1/auth/requests/{created['authId']}/approve"
+    worker_count = 8
+    start = Barrier(worker_count)
+
+    def decide(index: int) -> tuple[int, int]:
+        start.wait()
+        decision = "approved" if index % 2 == 0 else "rejected"
+        response = client.post(
+            endpoint,
+            json=decision_payload(decision),
+        )
+        return response.status_code, response.json()["code"]
+
+    with ThreadPoolExecutor(max_workers=worker_count) as executor:
+        results = list(executor.map(decide, range(worker_count)))
+
+    assert sum(status == 200 for status, _ in results) == 1
+    assert all(
+        (status, code) == (200, 0) or (status, code) == (409, 40902)
+        for status, code in results
+    )
+    stored = repository.get_authorization(created["authId"])
+    assert stored is not None
+    assert stored.status in {"approved", "rejected"}

@@ -13,6 +13,7 @@ from vpp_common import ErrorCode, ServiceError
 from .repository import InMemoryRepository
 from .schemas import (
     AuthorizationCreateRequest,
+    AuthorizationDecisionRequest,
     AuthorizationRecord,
     DeviceCreateRequest,
     DeviceRecord,
@@ -190,11 +191,94 @@ class AuthorizationService:
             if saved is not None:
                 return saved.model_dump()
 
+    def get_authorization(self, auth_id: str) -> dict[str, Any]:
+        now = self._current_time()
+        record, outcome = self.repository.update_authorization(
+            auth_id,
+            lambda current: self._refresh_expiry(current, now),
+        )
+        if record is None:
+            raise ServiceError(ErrorCode.RESOURCE_NOT_FOUND)
+        if outcome == "expired":
+            raise ServiceError(ErrorCode.AUTHORIZATION_EXPIRED)
+        return record.model_dump()
+
+    def decide_authorization(
+        self,
+        auth_id: str,
+        request: AuthorizationDecisionRequest,
+    ) -> dict[str, Any]:
+        now, approved_at = self._current_time_with_text()
+
+        def decide(
+            current: AuthorizationRecord,
+        ) -> tuple[AuthorizationRecord, str]:
+            refreshed, outcome = self._refresh_expiry(current, now)
+            if outcome == "expired":
+                return refreshed, outcome
+            if refreshed.status != "requested":
+                return refreshed, "invalid_state"
+            if refreshed.ownerDid != request.approver_did:
+                return refreshed, "access_denied"
+
+            refreshed.status = request.decision
+            refreshed.decision = request.decision
+            refreshed.reason = request.reason
+            refreshed.approverDid = request.approver_did
+            refreshed.approvedAt = approved_at
+            return refreshed, "decided"
+
+        record, outcome = self.repository.update_authorization(auth_id, decide)
+        if record is None:
+            raise ServiceError(ErrorCode.RESOURCE_NOT_FOUND)
+        if outcome == "expired":
+            raise ServiceError(ErrorCode.AUTHORIZATION_EXPIRED)
+        if outcome == "invalid_state":
+            raise ServiceError(ErrorCode.INVALID_RESOURCE_STATE)
+        if outcome == "access_denied":
+            raise ServiceError(ErrorCode.ACCESS_DENIED)
+        return record.model_dump()
+
     def _require_active_subject(self, subject_did: str) -> SubjectRecord:
         subject = self.repository.get_subject(subject_did)
         if subject is None or subject.status != "active":
             raise ServiceError(ErrorCode.INVALID_DID)
         return subject
+
+    def _current_time(self) -> datetime:
+        now, _ = self._current_time_with_text()
+        return now
+
+    def _current_time_with_text(self) -> tuple[datetime, str]:
+        try:
+            return self._normalize_timestamp(self.clock.now())
+        except (OverflowError, OSError, TypeError, ValueError):
+            raise ServiceError(ErrorCode.INVALID_TIMESTAMP) from None
+
+    @staticmethod
+    def _refresh_expiry(
+        record: AuthorizationRecord,
+        now: datetime,
+    ) -> tuple[AuthorizationRecord, str]:
+        if record.status == "expired":
+            return record, "expired"
+        if record.status != "approved":
+            return record, "active"
+
+        try:
+            expire_at = datetime.fromisoformat(
+                record.expireAt.replace("Z", "+00:00")
+            )
+            normalized_expiry, _ = AuthorizationService._normalize_timestamp(
+                expire_at
+            )
+        except (OverflowError, OSError, TypeError, ValueError):
+            raise ServiceError(ErrorCode.INVALID_TIMESTAMP) from None
+
+        if normalized_expiry <= now:
+            record.status = "expired"
+            return record, "expired"
+        return record, "active"
 
     @staticmethod
     def _normalize_timestamp(value: datetime) -> tuple[datetime, str]:

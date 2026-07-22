@@ -29,3 +29,24 @@ def test_health_returns_unified_response_and_trace_id(
 
     timestamp = datetime.fromisoformat(body["timestamp"].replace("Z", "+00:00"))
     assert timestamp.utcoffset() == timedelta(0)
+
+
+def test_exact_business_route_surface(app: FastAPI) -> None:
+    actual = {
+        (method, route.path)
+        for route in app.routes
+        for method in (route.methods or set())
+        if route.path
+        not in {"/openapi.json", "/docs", "/docs/oauth2-redirect", "/redoc"}
+        and method not in {"HEAD", "OPTIONS"}
+    }
+
+    assert actual == {
+        ("GET", "/health"),
+        ("POST", "/api/v1/identity/subjects"),
+        ("POST", "/api/v1/identity/devices"),
+        ("POST", "/api/v1/identity/verify"),
+        ("POST", "/api/v1/auth/requests"),
+        ("POST", "/api/v1/auth/requests/{auth_id}/approve"),
+        ("GET", "/api/v1/auth/requests/{auth_id}"),
+    }

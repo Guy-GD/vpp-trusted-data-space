@@ -9,6 +9,7 @@ from vpp_common.schemas import HealthData
 from .repository import InMemoryRepository
 from .schemas import (
     AuthorizationCreateRequest,
+    AuthorizationDecisionRequest,
     DeviceCreateRequest,
     IdentityVerifyRequest,
     SubjectCreateRequest,
@@ -118,5 +119,34 @@ def build_router(
             lambda: authorization.create_authorization(request),
         )
         return vpp_common.success(data)
+
+    @router.post("/api/v1/auth/requests/{auth_id}/approve")
+    def decide_authorization(
+        auth_id: str,
+        request: AuthorizationDecisionRequest,
+        idempotency_key: Annotated[
+            str | None,
+            Header(alias="Idempotency-Key"),
+        ] = None,
+        caller_did: Annotated[
+            str | None,
+            Header(alias="X-Caller-Did"),
+        ] = None,
+    ):
+        authorization.require_matching_caller(
+            caller_did,
+            request.approver_did,
+        )
+        data = idempotency.execute(
+            normalize_idempotency_key(idempotency_key),
+            f"decide-authorization:{auth_id}",
+            request.model_dump(mode="json", by_alias=True),
+            lambda: authorization.decide_authorization(auth_id, request),
+        )
+        return vpp_common.success(data)
+
+    @router.get("/api/v1/auth/requests/{auth_id}")
+    def get_authorization(auth_id: str):
+        return vpp_common.success(authorization.get_authorization(auth_id))
 
     return router

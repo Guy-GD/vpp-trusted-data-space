@@ -584,7 +584,7 @@ def test_idempotency_executes_concurrent_same_key_once(
     ) == 1
 
 
-def test_router_exposes_only_identity_and_authorization_create_routes(app) -> None:
+def test_router_exposes_only_frozen_identity_and_authorization_routes(app) -> None:
     paths = {
         route.path
         for route in app.routes
@@ -597,4 +597,6 @@ def test_router_exposes_only_identity_and_authorization_create_routes(app) -> No
         "/api/v1/identity/devices",
         "/api/v1/identity/verify",
         "/api/v1/auth/requests",
+        "/api/v1/auth/requests/{auth_id}/approve",
+        "/api/v1/auth/requests/{auth_id}",
     }

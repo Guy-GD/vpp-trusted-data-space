@@ -112,6 +112,24 @@ class InMemoryRepository:
             record = self.authorizations.get(auth_id)
             return record.model_copy(deep=True) if record is not None else None
 
+    def update_authorization(
+        self,
+        auth_id: str,
+        action: Callable[
+            [AuthorizationRecord],
+            tuple[AuthorizationRecord, str],
+        ],
+    ) -> tuple[AuthorizationRecord | None, str | None]:
+        with self._lock:
+            current = self.authorizations.get(auth_id)
+            if current is None:
+                return None, None
+
+            updated, outcome = action(current.model_copy(deep=True))
+            stored = updated.model_copy(deep=True)
+            self.authorizations[auth_id] = stored
+            return stored.model_copy(deep=True), outcome
+
     def execute_idempotent(
         self,
         *,
