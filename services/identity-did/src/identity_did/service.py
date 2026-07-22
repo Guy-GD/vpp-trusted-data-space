@@ -121,6 +121,7 @@ class IdempotencyService:
         operation: str,
         payload: dict[str, Any],
         action: Callable[[], dict[str, Any]],
+        replay_validation: Callable[[], None] | None = None,
     ) -> dict[str, Any]:
         if key is None:
             return action()
@@ -130,6 +131,7 @@ class IdempotencyService:
             key=key,
             fingerprint=fingerprint,
             action=action,
+            replay_validation=replay_validation,
         )
         if data is None:
             raise ServiceError(ErrorCode.IDEMPOTENCY_CONFLICT)
@@ -205,6 +207,17 @@ class AuthorizationService:
             raise ServiceError(ErrorCode.AUTHORIZATION_EXPIRED)
         return record.model_dump()
 
+    def require_not_expired(self, auth_id: str) -> None:
+        now = self._current_time()
+        record, outcome = self.repository.update_authorization(
+            auth_id,
+            lambda current: self._refresh_expiry(current, now),
+        )
+        if record is None:
+            raise ServiceError(ErrorCode.RESOURCE_NOT_FOUND)
+        if outcome == "expired":
+            raise ServiceError(ErrorCode.AUTHORIZATION_EXPIRED)
+
     def decide_authorization(
         self,
         auth_id: str,
@@ -264,7 +277,7 @@ class AuthorizationService:
     ) -> tuple[AuthorizationRecord, str]:
         if record.status == "expired":
             return record, "expired"
-        if record.status != "approved":
+        if record.status not in {"requested", "approved"}:
             return record, "active"
 
         try:

@@ -120,9 +120,9 @@ def build_router(
         )
         return vpp_common.success(data)
 
-    @router.post("/api/v1/auth/requests/{auth_id}/approve")
+    @router.post("/api/v1/auth/requests/{authId}/approve")
     def decide_authorization(
-        auth_id: str,
+        authId: str,
         request: AuthorizationDecisionRequest,
         idempotency_key: Annotated[
             str | None,
@@ -139,14 +139,15 @@ def build_router(
         )
         data = idempotency.execute(
             normalize_idempotency_key(idempotency_key),
-            f"decide-authorization:{auth_id}",
+            f"decide-authorization:{authId}",
             request.model_dump(mode="json", by_alias=True),
-            lambda: authorization.decide_authorization(auth_id, request),
+            lambda: authorization.decide_authorization(authId, request),
+            replay_validation=lambda: authorization.require_not_expired(authId),
         )
         return vpp_common.success(data)
 
-    @router.get("/api/v1/auth/requests/{auth_id}")
-    def get_authorization(auth_id: str):
-        return vpp_common.success(authorization.get_authorization(auth_id))
+    @router.get("/api/v1/auth/requests/{authId}")
+    def get_authorization(authId: str):
+        return vpp_common.success(authorization.get_authorization(authId))
 
     return router

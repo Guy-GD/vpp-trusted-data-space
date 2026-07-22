@@ -136,12 +136,15 @@ class InMemoryRepository:
         key: str,
         fingerprint: str,
         action: Callable[[], dict[str, Any]],
+        replay_validation: Callable[[], None] | None = None,
     ) -> dict[str, Any] | None:
         with self._lock:
             stored = self.idempotency.get(key)
             if stored is not None:
                 if stored.fingerprint != fingerprint:
                     return None
+                if replay_validation is not None:
+                    replay_validation()
                 return copy.deepcopy(stored.data)
 
             data = action()

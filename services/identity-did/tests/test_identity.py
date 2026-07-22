@@ -597,6 +597,6 @@ def test_router_exposes_only_frozen_identity_and_authorization_routes(app) -> No
         "/api/v1/identity/devices",
         "/api/v1/identity/verify",
         "/api/v1/auth/requests",
-        "/api/v1/auth/requests/{auth_id}/approve",
-        "/api/v1/auth/requests/{auth_id}",
+        "/api/v1/auth/requests/{authId}/approve",
+        "/api/v1/auth/requests/{authId}",
     }

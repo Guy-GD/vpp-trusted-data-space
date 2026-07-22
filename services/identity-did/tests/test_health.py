@@ -47,6 +47,6 @@ def test_exact_business_route_surface(app: FastAPI) -> None:
         ("POST", "/api/v1/identity/devices"),
         ("POST", "/api/v1/identity/verify"),
         ("POST", "/api/v1/auth/requests"),
-        ("POST", "/api/v1/auth/requests/{auth_id}/approve"),
-        ("GET", "/api/v1/auth/requests/{auth_id}"),
+        ("POST", "/api/v1/auth/requests/{authId}/approve"),
+        ("GET", "/api/v1/auth/requests/{authId}"),
     }

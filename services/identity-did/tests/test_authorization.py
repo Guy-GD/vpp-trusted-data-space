@@ -657,6 +657,93 @@ def test_approved_authorization_expires_on_query_and_stays_expired(
     assert decided_again.json()["code"] == 40303
 
 
+@pytest.mark.parametrize(
+    "advance_by",
+    [timedelta(hours=1), timedelta(hours=2)],
+    ids=["exact-expiry", "past-expiry"],
+)
+def test_requested_authorization_expires_atomically_before_decision(
+    client: TestClient,
+    repository: InMemoryRepository,
+    clock: Any,
+    advance_by: timedelta,
+) -> None:
+    expire_at = (clock.now() + timedelta(hours=1)).isoformat()
+    created = create_authorization(
+        client,
+        expire_at,
+        key=f"auth-requested-expiry-{advance_by.total_seconds()}",
+    )
+    clock.advance(advance_by)
+
+    response = client.post(
+        f"/api/v1/auth/requests/{created['authId']}/approve",
+        json=decision_payload(),
+    )
+
+    assert response.status_code == 403
+    assert response.json()["code"] == 40303
+    stored = repository.get_authorization(created["authId"])
+    assert stored is not None
+    assert stored.status == "expired"
+
+
+def test_expired_requested_authorization_is_concurrency_safe(
+    client: TestClient,
+    repository: InMemoryRepository,
+    clock: Any,
+) -> None:
+    expire_at = (clock.now() + timedelta(minutes=1)).isoformat()
+    created = create_authorization(client, expire_at, key="auth-expired-race")
+    endpoint = f"/api/v1/auth/requests/{created['authId']}/approve"
+    clock.advance(timedelta(minutes=1))
+    worker_count = 8
+    start = Barrier(worker_count)
+
+    def decide() -> tuple[int, int]:
+        start.wait()
+        response = client.post(endpoint, json=decision_payload())
+        return response.status_code, response.json()["code"]
+
+    with ThreadPoolExecutor(max_workers=worker_count) as executor:
+        results = list(executor.map(lambda _: decide(), range(worker_count)))
+
+    assert results == [(403, 40303)] * worker_count
+    stored = repository.get_authorization(created["authId"])
+    assert stored is not None
+    assert stored.status == "expired"
+
+
+def test_expired_state_takes_precedence_over_approval_idempotency_replay(
+    client: TestClient,
+    clock: Any,
+) -> None:
+    expire_at = (clock.now() + timedelta(hours=1)).isoformat()
+    created = create_authorization(client, expire_at, key="auth-replay-expiry")
+    endpoint = f"/api/v1/auth/requests/{created['authId']}"
+    payload = decision_payload()
+    first = client.post(
+        f"{endpoint}/approve",
+        json=payload,
+        headers={"Idempotency-Key": "approval-expiry-replay"},
+    )
+    assert first.status_code == 200
+
+    clock.advance(timedelta(hours=2))
+    queried = client.get(endpoint)
+    assert queried.status_code == 403
+    assert queried.json()["code"] == 40303
+
+    replay = client.post(
+        f"{endpoint}/approve",
+        json=payload,
+        headers={"Idempotency-Key": "approval-expiry-replay"},
+    )
+
+    assert replay.status_code == 403
+    assert replay.json()["code"] == 40303
+
+
 def test_concurrent_decisions_allow_at_most_one_success(
     client: TestClient,
     repository: InMemoryRepository,
