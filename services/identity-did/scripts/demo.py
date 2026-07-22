@@ -1,5 +1,6 @@
 import json
 import os
+import sys
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import uuid4
@@ -15,66 +16,148 @@ REQUESTER_DID = "did:vpp:operator:001"
 OWNER_DID = "did:vpp:load-aggregator:001"
 
 
+class DemoError(RuntimeError):
+    """A readable failure from the repeatable Mock demonstration."""
+
+
+def _request_url(response: httpx.Response) -> str:
+    try:
+        return str(response.request.url)
+    except RuntimeError:
+        return "unknown request URL"
+
+
+def response_data(response: httpx.Response) -> dict[str, Any]:
+    request_url = _request_url(response)
+    try:
+        body = response.json()
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise DemoError(
+            f"{request_url} returned HTTP {response.status_code} with invalid JSON"
+        ) from exc
+
+    if not isinstance(body, dict):
+        raise DemoError(
+            f"{request_url} returned HTTP {response.status_code} without "
+            "a response envelope"
+        )
+
+    code = body.get("code")
+    message = body.get("message")
+    if response.is_error or code != 0:
+        raise DemoError(
+            f"{request_url} returned HTTP {response.status_code}: "
+            f"code={code!r}, message={message!r}"
+        )
+
+    data = body.get("data")
+    if not isinstance(data, dict):
+        raise DemoError(f"{request_url} returned a success envelope without data")
+    return data
+
+
 def show_mock_data(title: str, response: httpx.Response) -> dict[str, Any]:
-    response.raise_for_status()
-    data = response.json()["data"]
+    data = response_data(response)
     print(f"\n=== {title} ===")
     print(json.dumps(data, ensure_ascii=False, indent=2))
     return data
 
 
-def main() -> None:
-    run_id = uuid4().hex
-    expire_at = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
-
-    with httpx.Client(
-        base_url=BASE_URL,
-        timeout=HTTP_TIMEOUT,
-        trust_env=False,
-    ) as client:
-        authorization = show_mock_data(
-            "1. 创建 requested 授权",
-            client.post(
-                "/api/v1/auth/requests",
-                json={
-                    "requesterDid": REQUESTER_DID,
-                    "ownerDid": OWNER_DID,
-                    "assetId": f"asset_demo_{run_id}",
-                    "purpose": "federated_training_demo",
-                    "expireAt": expire_at,
-                },
-                headers={
-                    "Idempotency-Key": f"demo-create-{run_id}",
-                    "X-Caller-Did": REQUESTER_DID,
-                },
-            ),
+def require_status(
+    data: dict[str, Any],
+    expected: str,
+    request_url: str,
+) -> None:
+    actual = data.get("status")
+    if actual != expected:
+        raise DemoError(
+            f"{request_url} returned unexpected status {actual!r}; "
+            f"expected {expected!r}"
         )
-        assert authorization["status"] == "requested"
 
-        approved = show_mock_data(
-            "2. 所有者批准授权",
-            client.post(
-                f"/api/v1/auth/requests/{authorization['authId']}/approve",
-                json={
-                    "approverDid": OWNER_DID,
-                    "decision": "approved",
-                    "reason": "week1 repeatable mock demo",
-                },
-                headers={
-                    "Idempotency-Key": f"demo-approve-{run_id}",
-                    "X-Caller-Did": OWNER_DID,
-                },
-            ),
-        )
-        assert approved["status"] == "approved"
 
-        queried = show_mock_data(
-            "3. 查询最终授权",
-            client.get(f"/api/v1/auth/requests/{authorization['authId']}"),
+def run_demo(
+    client: httpx.Client,
+    *,
+    run_id: str | None = None,
+    expire_at: str | None = None,
+) -> dict[str, Any]:
+    active_run_id = run_id or uuid4().hex
+    active_expiry = expire_at or (
+        datetime.now(timezone.utc) + timedelta(hours=1)
+    ).isoformat()
+
+    create_path = "/api/v1/auth/requests"
+    create_response = client.post(
+        create_path,
+        json={
+            "requesterDid": REQUESTER_DID,
+            "ownerDid": OWNER_DID,
+            "assetId": f"asset_demo_{active_run_id}",
+            "purpose": "federated_training_demo",
+            "expireAt": active_expiry,
+        },
+        headers={
+            "Idempotency-Key": f"demo-create-{active_run_id}",
+            "X-Caller-Did": REQUESTER_DID,
+        },
+    )
+    authorization = show_mock_data("1. 创建 requested 授权", create_response)
+    require_status(authorization, "requested", _request_url(create_response))
+
+    auth_id = authorization.get("authId")
+    if not isinstance(auth_id, str) or not auth_id:
+        raise DemoError(
+            f"{_request_url(create_response)} returned no usable authId"
         )
-        assert queried["authId"] == authorization["authId"]
-        assert queried["status"] == "approved"
+
+    approve_path = f"/api/v1/auth/requests/{auth_id}/approve"
+    approve_response = client.post(
+        approve_path,
+        json={
+            "approverDid": OWNER_DID,
+            "decision": "approved",
+            "reason": "week1 repeatable mock demo",
+        },
+        headers={
+            "Idempotency-Key": f"demo-approve-{active_run_id}",
+            "X-Caller-Did": OWNER_DID,
+        },
+    )
+    approved = show_mock_data("2. 所有者批准授权", approve_response)
+    require_status(approved, "approved", _request_url(approve_response))
+
+    query_path = f"/api/v1/auth/requests/{auth_id}"
+    query_response = client.get(query_path)
+    queried = show_mock_data("3. 查询最终授权", query_response)
+    require_status(queried, "approved", _request_url(query_response))
+    if queried.get("authId") != auth_id:
+        raise DemoError(
+            f"{_request_url(query_response)} returned a different authId"
+        )
+    return queried
+
+
+def main() -> int:
+    try:
+        with httpx.Client(
+            base_url=BASE_URL,
+            timeout=HTTP_TIMEOUT,
+            trust_env=False,
+        ) as client:
+            run_demo(client)
+    except httpx.RequestError as exc:
+        request_url = str(exc.request.url) if exc.request is not None else BASE_URL
+        print(
+            f"演示失败：请求 {request_url} 连接或超时：{exc}",
+            file=sys.stderr,
+        )
+        return 1
+    except DemoError as exc:
+        print(f"演示失败：{exc}", file=sys.stderr)
+        return 1
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
