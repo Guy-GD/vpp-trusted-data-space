@@ -34,7 +34,9 @@ class Clock(Protocol):
 
 class SystemClock:
     def now(self) -> datetime:
-        return datetime.now(timezone.utc)
+        return datetime.fromisoformat(
+            vpp_common.utc_now_iso().replace("Z", "+00:00")
+        )
 
     def now_iso(self) -> str:
         return vpp_common.utc_now_iso()

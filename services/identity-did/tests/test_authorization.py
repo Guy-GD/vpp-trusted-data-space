@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from identity_did.main import create_app
 from identity_did.repository import InMemoryRepository
 from identity_did.schemas import AuthorizationRecord
+from identity_did.service import SystemClock
 
 
 REQUESTER_DID = "did:vpp:operator:001"
@@ -464,6 +465,41 @@ def test_owner_approves_requested_authorization(
     queried = client.get(f"/api/v1/auth/requests/{created['authId']}")
     assert queried.status_code == 200
     assert queried.json()["data"] == data
+
+
+def test_omitted_decision_defaults_to_approved(
+    client: TestClient,
+    future_expiry: str,
+) -> None:
+    created = create_authorization(client, future_expiry, key="auth-default-approve")
+
+    response = client.post(
+        f"/api/v1/auth/requests/{created['authId']}/approve",
+        json={"approverDid": OWNER_DID},
+    )
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["status"] == "approved"
+    assert data["decision"] == "approved"
+
+
+def test_system_clock_uses_shared_utc_time_utility(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = 0
+
+    def fake_utc_now_iso() -> str:
+        nonlocal calls
+        calls += 1
+        return "2042-06-07T08:09:10.321Z"
+
+    monkeypatch.setattr(vpp_common, "utc_now_iso", fake_utc_now_iso)
+
+    current = SystemClock().now()
+
+    assert current == datetime.fromisoformat("2042-06-07T08:09:10.321+00:00")
+    assert calls == 1
 
 
 def test_owner_rejects_requested_authorization_with_reason(

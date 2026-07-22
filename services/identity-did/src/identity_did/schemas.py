@@ -72,7 +72,7 @@ class AuthorizationCreateRequest(RequestSchema):
 
 class AuthorizationDecisionRequest(RequestSchema):
     approver_did: NonEmptyString = Field(alias="approverDid")
-    decision: Literal["approved", "rejected"]
+    decision: Literal["approved", "rejected"] = "approved"
     reason: NonEmptyString | None = None
 
 
