@@ -38,7 +38,8 @@ def build_router(
     router = APIRouter()
     service = IdentityService(repository)
     idempotency = IdempotencyService(repository)
-    authorization = AuthorizationService(repository, clock or SystemClock())
+    active_clock = clock if clock is not None else SystemClock()
+    authorization = AuthorizationService(repository, active_clock)
 
     @router.get("/health")
     def health():

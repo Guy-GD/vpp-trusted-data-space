@@ -1,11 +1,15 @@
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from threading import Barrier
+from typing import Any
 
 import pytest
+import vpp_common
 from fastapi.testclient import TestClient
 
+from identity_did.main import create_app
 from identity_did.repository import InMemoryRepository
+from identity_did.schemas import AuthorizationRecord
 
 
 REQUESTER_DID = "did:vpp:operator:001"
@@ -26,6 +30,23 @@ def assert_utc_timestamp(value: str) -> datetime:
     parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     assert parsed.utcoffset() == timedelta(0)
     return parsed
+
+
+def stored_authorization(auth_id: str, purpose: str) -> AuthorizationRecord:
+    return AuthorizationRecord(
+        authId=auth_id,
+        status="requested",
+        requesterDid=REQUESTER_DID,
+        ownerDid=OWNER_DID,
+        assetId="asset_existing",
+        purpose=purpose,
+        expireAt="2030-01-11T00:00:00.000Z",
+        decision=None,
+        reason=None,
+        approverDid=None,
+        createdAt="2030-01-01T00:00:00.000Z",
+        approvedAt=None,
+    )
 
 
 def test_create_requested_authorization_from_seed_dids(
@@ -113,6 +134,163 @@ def test_create_authorization_rejects_numeric_expiry(
 
     assert response.status_code == 400
     assert response.json()["code"] == 40001
+
+
+def test_expiry_must_remain_future_after_millisecond_normalization(
+    client: TestClient,
+    clock: Any,
+) -> None:
+    clock.current = datetime.fromisoformat("2030-01-01T00:00:00.123456+00:00")
+    expire_at = (clock.current + timedelta(microseconds=1)).isoformat()
+
+    response = client.post(
+        "/api/v1/auth/requests",
+        json=authorization_payload(expire_at),
+    )
+
+    assert response.status_code == 400
+    assert response.json()["code"] == 40003
+
+
+def test_creation_uses_one_now_snapshot_for_validation_and_created_at() -> None:
+    class AdvancingClock:
+        def __init__(self) -> None:
+            self.current = datetime.fromisoformat(
+                "2030-01-01T00:00:00.123456+00:00"
+            )
+            self.calls = 0
+
+        def now(self) -> datetime:
+            snapshot = self.current
+            self.current += timedelta(days=1)
+            self.calls += 1
+            return snapshot
+
+        def now_iso(self) -> str:
+            return self.current.isoformat(timespec="milliseconds").replace(
+                "+00:00", "Z"
+            )
+
+    clock = AdvancingClock()
+    app = create_app(InMemoryRepository(), clock)
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/auth/requests",
+            json=authorization_payload("2030-01-11T00:00:00Z"),
+        )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["createdAt"] == "2030-01-01T00:00:00.123Z"
+    assert clock.calls == 1
+
+
+def test_extreme_expiry_timezone_returns_controlled_invalid_timestamp(
+    client: TestClient,
+) -> None:
+    response = client.post(
+        "/api/v1/auth/requests",
+        json=authorization_payload("9999-12-31T23:59:59.999999-14:00"),
+    )
+
+    assert response.status_code == 400
+    assert response.json()["code"] == 40003
+
+
+def test_extreme_clock_timezone_returns_controlled_invalid_timestamp(
+    client: TestClient,
+    clock: Any,
+) -> None:
+    clock.current = datetime.min.replace(
+        tzinfo=datetime.fromisoformat("2000-01-01T00:00:00+14:00").tzinfo
+    )
+
+    response = client.post(
+        "/api/v1/auth/requests",
+        json=authorization_payload("2030-01-11T00:00:00Z"),
+    )
+
+    assert response.status_code == 400
+    assert response.json()["code"] == 40003
+
+
+def test_falsey_clock_is_preserved_by_dependency_injection() -> None:
+    class FalseyClock:
+        current = datetime.fromisoformat("2040-01-01T00:00:00.456789+00:00")
+
+        def __bool__(self) -> bool:
+            return False
+
+        def now(self) -> datetime:
+            return self.current
+
+        def now_iso(self) -> str:
+            return self.current.isoformat(timespec="milliseconds").replace(
+                "+00:00", "Z"
+            )
+
+    app = create_app(InMemoryRepository(), FalseyClock())
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/auth/requests",
+            json=authorization_payload("2040-01-11T00:00:00Z"),
+        )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["createdAt"] == "2040-01-01T00:00:00.456Z"
+
+
+def test_authorization_id_collision_retries_without_overwriting(
+    monkeypatch: pytest.MonkeyPatch,
+    repository: InMemoryRepository,
+    clock: Any,
+    future_expiry: str,
+) -> None:
+    existing = stored_authorization("auth_collision", "existing_purpose")
+    assert repository.create_authorization(existing) is not None
+    generated_ids = iter(["auth_collision", "auth_after_collision"])
+    monkeypatch.setattr(vpp_common, "new_id", lambda prefix: next(generated_ids))
+    app = create_app(repository, clock)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/auth/requests",
+            json=authorization_payload(future_expiry),
+        )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["authId"] == "auth_after_collision"
+    assert repository.authorizations["auth_collision"].purpose == "existing_purpose"
+    assert len(repository.authorizations) == 2
+
+
+def test_repository_and_response_authorizations_are_isolated_copies(
+    client: TestClient,
+    repository: InMemoryRepository,
+    future_expiry: str,
+) -> None:
+    original = stored_authorization("auth_direct", "direct_purpose")
+    saved = repository.create_authorization(original)
+    assert saved is not None
+    original.status = "approved"
+    saved.status = "rejected"
+    persisted = repository.get_authorization("auth_direct")
+    assert persisted is not None
+    assert persisted.status == "requested"
+
+    response = client.post(
+        "/api/v1/auth/requests",
+        json=authorization_payload(future_expiry),
+    )
+    assert response.status_code == 200
+    response_data = response.json()["data"]
+    response_data["status"] = "approved"
+
+    stored = repository.get_authorization(response_data["authId"])
+    assert stored is not None
+    stored.status = "rejected"
+    fresh = repository.get_authorization(response_data["authId"])
+    assert fresh is not None
+    assert fresh.status == "requested"
 
 
 def test_authorization_idempotency_replays_data_with_current_trace(

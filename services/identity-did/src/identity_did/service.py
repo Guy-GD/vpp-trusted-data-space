@@ -160,19 +160,17 @@ class AuthorizationService:
         self._require_active_subject(request.requester_did)
         self._require_active_subject(request.owner_did)
 
-        expire_at = request.expire_at
-        if (
-            expire_at.tzinfo is None
-            or expire_at.utcoffset() is None
-            or expire_at <= self.clock.now()
-        ):
+        try:
+            now, created_at = self._normalize_timestamp(self.clock.now())
+            expire_at, normalized_expiry = self._normalize_timestamp(
+                request.expire_at
+            )
+        except (OverflowError, OSError, TypeError, ValueError):
             raise ServiceError(ErrorCode.INVALID_TIMESTAMP)
 
-        normalized_expiry = (
-            expire_at.astimezone(timezone.utc)
-            .isoformat(timespec="milliseconds")
-            .replace("+00:00", "Z")
-        )
+        if expire_at <= now:
+            raise ServiceError(ErrorCode.INVALID_TIMESTAMP)
+
         while True:
             record = AuthorizationRecord(
                 authId=vpp_common.new_id("auth_"),
@@ -185,7 +183,7 @@ class AuthorizationService:
                 decision=None,
                 reason=None,
                 approverDid=None,
-                createdAt=self.clock.now_iso(),
+                createdAt=created_at,
                 approvedAt=None,
             )
             saved = self.repository.create_authorization(record)
@@ -197,3 +195,16 @@ class AuthorizationService:
         if subject is None or subject.status != "active":
             raise ServiceError(ErrorCode.INVALID_DID)
         return subject
+
+    @staticmethod
+    def _normalize_timestamp(value: datetime) -> tuple[datetime, str]:
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("timestamp must be timezone-aware")
+        utc_value = value.astimezone(timezone.utc)
+        normalized = utc_value.replace(
+            microsecond=(utc_value.microsecond // 1000) * 1000
+        )
+        formatted = normalized.isoformat(timespec="milliseconds").replace(
+            "+00:00", "Z"
+        )
+        return normalized, formatted

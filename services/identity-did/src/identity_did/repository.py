@@ -107,6 +107,11 @@ class InMemoryRepository:
             self.authorizations[record.authId] = stored
             return stored.model_copy(deep=True)
 
+    def get_authorization(self, auth_id: str) -> AuthorizationRecord | None:
+        with self._lock:
+            record = self.authorizations.get(auth_id)
+            return record.model_copy(deep=True) if record is not None else None
+
     def execute_idempotent(
         self,
         *,
