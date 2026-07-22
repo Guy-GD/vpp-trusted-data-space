@@ -1,146 +1,104 @@
-# DID 与授权模块 Demo
+# Identity DID 第一周 Mock 服务
 
-这是 `vpp-trusted-data-space` 项目中 DID 与授权模块的可运行 Mock Demo。它按照项目的接口契约实现主体/设备注册、身份校验、授权申请、授权审批和授权查询，适合本地学习、接口联调与项目演示。
+`identity-did` 提供身份注册、Mock 身份验证和授权状态流转，用于第一周演示与跨模块联调。数据仅保存在当前进程内存中，服务重启后恢复为四个预置主体；本模块不连接数据库、DID 链或真实密钥系统。
 
-> 重要：本 Demo 不是真实的区块链 DID 或生产级密码系统。数据只保存在进程内存中，服务重启后会清空。
+> 安全提示：签名校验是 **Mock-only** 教学规则，不是生产密码学。禁止将它用于真实身份认证，也不要向服务提交真实凭据、私钥或生产数据。
 
-## 已实现功能
+## 开发环境与安装
 
-| 接口 | 功能 |
-| --- | --- |
-| `GET /health` | 健康检查 |
-| `POST /api/v1/identity/subjects` | 注册主体 DID |
-| `POST /api/v1/identity/devices` | 为已注册主体注册设备 DID |
-| `POST /api/v1/identity/verify` | 校验 DID、载荷哈希和 Mock 签名 |
-| `POST /api/v1/auth/requests` | 创建数据使用授权申请 |
-| `POST /api/v1/auth/requests/{authId}/approve` | 批准或拒绝授权申请 |
-| `GET /api/v1/auth/requests/{authId}` | 查询授权状态 |
-
-所有响应统一使用以下结构：
-
-```json
-{
-  "code": 0,
-  "message": "ok",
-  "data": {},
-  "traceId": "trace_xxx"
-}
-```
-
-## 技术栈
-
-- Python 3.11+
-- FastAPI + Pydantic
-- Uvicorn
-- Pytest + FastAPI TestClient
-- 进程内字典存储
-
-选择这套技术栈的原因是它与当前项目的服务化接口形式匹配，代码量较小，便于在学习阶段理解 DID、签名校验、授权状态机和接口测试。
-
-## 本地运行
-
-在 PowerShell 中进入本目录：
+统一从仓库根目录执行以下命令，并使用项目共享的 Python 3.11 环境。不要在 `services/identity-did` 内创建模块独立虚拟环境。
 
 ```powershell
-cd D:\Documents\联邦学习\vpp-trusted-data-space\services\identity-did
-py -3.12 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install -r requirements.txt
-python -m uvicorn app.main:app --reload --port 8000
+python -m pip install -e packages/common -e "services/identity-did[test]"
 ```
 
-启动后可访问：
-
-- 健康检查：`http://127.0.0.1:8000/health`
-- Swagger 调试页面：`http://127.0.0.1:8000/docs`
-
-## 手动 curl 演示
-
-重启服务清空内存数据后，在另一个 PowerShell 窗口按顺序执行。示例中的 DID 和授权编号依赖这个执行顺序。
+安装完成后，从仓库根目录启动本地服务：
 
 ```powershell
-# 1. 健康检查
-curl.exe -s http://127.0.0.1:8000/health
-
-# 2. 注册请求方（operator:001）
-'{"name":"VPP operator","type":"operator","publicKey":"bW9jay1wdWJsaWMta2V5"}' | curl.exe -s http://127.0.0.1:8000/api/v1/identity/subjects -H 'Content-Type: application/json' -H 'X-Trace-Id: trace-curl-001' -H 'Idempotency-Key: curl-subject-001' --data-binary '@-'
-
-# 3. 注册数据所有者（load-aggregator:002）
-'{"name":"Load aggregator","type":"load_aggregator","publicKey":"bW9jay1wdWJsaWMta2V5"}' | curl.exe -s http://127.0.0.1:8000/api/v1/identity/subjects -H 'Content-Type: application/json' --data-binary '@-'
-
-# 4. 注册设备
-'{"deviceName":"Smart meter 01","deviceType":"smart_meter","ownerDid":"did:vpp:load-aggregator:002","publicKey":"bW9jay1wdWJsaWMta2V5"}' | curl.exe -s http://127.0.0.1:8000/api/v1/identity/devices -H 'Content-Type: application/json' --data-binary '@-'
-
-# 5. 验证请求方签名
-'{"subjectDid":"did:vpp:operator:001","signature":"Elqp/Rw0+M0eDhFc4ifBxyZ622sbw8ZVPivVnDRZ2Io=","payloadHash":"sha256:0000000000000000000000000000000000000000000000000000000000000000"}' | curl.exe -s http://127.0.0.1:8000/api/v1/identity/verify -H 'Content-Type: application/json' --data-binary '@-'
-
-# 6. 创建授权申请（auth_001）
-'{"requesterDid":"did:vpp:operator:001","ownerDid":"did:vpp:load-aggregator:002","assetId":"asset_demo_load_curve","purpose":"federated_training","expireAt":"2099-12-31T23:59:59+08:00"}' | curl.exe -s http://127.0.0.1:8000/api/v1/auth/requests -H 'Content-Type: application/json' -H 'X-Caller-Did: did:vpp:operator:001' --data-binary '@-'
-
-# 7. 数据所有者批准授权
-'{"approverDid":"did:vpp:load-aggregator:002"}' | curl.exe -s http://127.0.0.1:8000/api/v1/auth/requests/auth_001/approve -H 'Content-Type: application/json' -H 'X-Caller-Did: did:vpp:load-aggregator:002' --data-binary '@-'
-
-# 8. 查询最终授权状态
-curl.exe -s http://127.0.0.1:8000/api/v1/auth/requests/auth_001
+python -m uvicorn identity_did.main:app --reload --port 8003
 ```
 
-## 一键演示
+健康检查为 `http://127.0.0.1:8003/health`，交互文档为 `http://127.0.0.1:8003/docs`。
 
-安装依赖后执行：
+## 公开接口
+
+本服务只提供以下七个业务接口：
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| `GET` | `/health` | 健康检查 |
+| `POST` | `/api/v1/identity/subjects` | 注册主体 DID |
+| `POST` | `/api/v1/identity/devices` | 注册设备 DID |
+| `POST` | `/api/v1/identity/verify` | 执行确定性的 Mock 签名校验 |
+| `POST` | `/api/v1/auth/requests` | 创建 `requested` 授权 |
+| `POST` | `/api/v1/auth/requests/{authId}/approve` | 批准或拒绝授权 |
+| `GET` | `/api/v1/auth/requests/{authId}` | 查询授权并刷新过期状态 |
+
+所有响应使用项目公共信封，包含 `code`、`message`、`data`、`traceId` 和 UTC `timestamp`。写接口支持 `Idempotency-Key`；授权创建与审批可传 `X-Caller-Did`，传入时必须与请求体中的调用方 DID 一致。
+
+## 预置 DID
+
+每次启动后，以下四个主体均已存在且状态为 `active`，联调无需先注册它们：
+
+- `did:vpp:operator:001`
+- `did:vpp:load-aggregator:001`
+- `did:vpp:renewable-plant:001`
+- `did:vpp:storage:001`
+
+## 可重复正常路径演示
+
+先在一个终端启动端口 `8003` 的服务，再在仓库根目录的另一个终端运行：
 
 ```powershell
-python -m scripts.demo
+python services/identity-did/scripts/demo.py
 ```
 
-脚本会按顺序演示：注册请求方和数据所有者、幂等重放、注册设备、验证签名、申请授权、批准授权、查询最终状态。
+脚本使用预置的 `operator` 作为请求方、`load-aggregator` 作为数据所有者，并为每次 POST 生成新的幂等键。它会依次创建 `requested` 授权、将其批准为 `approved`、再查询最终记录，仅打印 Mock 响应中的 `data`。
 
-## 运行测试
+如需改变服务地址或超时时间，可设置环境变量：
 
 ```powershell
-python -m pytest -q
+$env:IDENTITY_DID_BASE_URL = "http://127.0.0.1:8003"
+$env:IDENTITY_DID_TIMEOUT = "10"
+python services/identity-did/scripts/demo.py
 ```
 
-当前测试覆盖健康检查、统一错误响应、主体/设备注册、签名校验、授权状态流转、幂等冲突和调用方 DID 防冒用。
+## 失败路径检查清单
 
-## Mock 签名规则
+可通过 Swagger 或任意 HTTP 客户端重复验证：
 
-为了让 Demo 不依赖密钥文件或区块链，签名采用可重复计算的教学规则：
+- `40102 unknown DID`：用不存在的 `requesterDid` 或 `ownerDid` 创建授权，或让 `X-Caller-Did` 与请求体不一致。
+- `40303 authorization expired`：批准一个短有效期授权，越过 `expireAt` 后查询或再次审批。
+- `40401 authorization not found`：查询或审批不存在的 `authId`。
+- `40901 idempotency conflict`：对同一路径复用一个 `Idempotency-Key`，但改变请求体。
+- `40902 authorization already decided`：对已批准或已拒绝且尚未过期的授权再次审批。
 
-```text
-signature = Base64(SHA256(publicKey + ":" + payloadHash))
-payloadHash = "sha256:" + 64位十六进制摘要
+这些错误必须保持对应的 HTTP 状态码和公共错误信封；不要通过增加兼容接口或修改公共契约来规避失败。
+
+## 自动化测试
+
+从仓库根目录执行：
+
+```powershell
+python -m pytest services/identity-did/tests -v
 ```
 
-真实项目中应替换为标准非对称签名算法、DID Document 公钥解析和安全密钥管理，不能沿用此 Mock 规则。
+测试覆盖七个公开端点、动态 ID、幂等、调用方校验、正常与失败状态流转、自动过期和并发边界。
 
-## 请求头规则
+## Docker
 
-- `X-Trace-Id`：可选；未传时服务自动生成，响应中始终返回。
-- `Idempotency-Key`：写接口可选；同一键和同一请求会重放首次响应，同一键对应不同请求返回 `40901`。
-- `X-Caller-Did`：授权申请和审批的跨服务调用应传；传入后必须分别与 `requesterDid`、`approverDid` 一致，否则返回 `40102`。
+构建上下文必须是仓库根目录，以便同时安装 `vpp-common` 和本服务：
 
-## 目录结构
-
-```text
-identity-did/
-├── app/
-│   ├── errors.py       # 统一响应与业务异常
-│   ├── main.py         # FastAPI 路由
-│   ├── models.py       # 请求模型
-│   ├── service.py      # DID、授权、幂等业务逻辑
-│   └── store.py        # 内存存储与编号生成
-├── scripts/
-│   └── demo.py         # 一键演示脚本
-├── tests/              # 自动化测试
-└── requirements.txt
+```powershell
+docker build -f services/identity-did/Dockerfile -t vpp/identity-did:week1 .
+docker run --rm -p 8003:8000 vpp/identity-did:week1
 ```
 
-## 补充区（为 Demo 增加）
+容器内服务监听 `8000`，以非 root 用户运行；映射后仍通过 `http://127.0.0.1:8003/health` 检查。
 
-以下内容是为了使模块能够独立运行和学习而补充的，不代表项目已确定的生产方案：
+## Mock 边界
 
-- 使用 FastAPI TestClient 编排一键演示流程。
-- 使用内存存储代替 PostgreSQL/Redis。
-- 使用确定性 Mock 签名代替 Ed25519/ECDSA 与真实 DID Resolver。
-- `X-Caller-Did` 仅做字段一致性校验，未实现 OAuth2、JWT、mTLS 或服务身份认证。
-- 幂等记录仅在当前进程有效，未实现分布式锁与持久化。
+- 仓库为进程内字典，不提供持久化或分布式一致性。
+- Mock 签名为 `Base64(SHA256(publicKey + ":" + payloadHash))`，不能替代 Ed25519/ECDSA、DID Document 解析或密钥管理。
+- `X-Caller-Did` 只检查字段一致性，不实现 OAuth2、JWT、mTLS 或服务身份认证。
+- 本交付物不包含生产基础设施、真实凭据和额外业务接口。
