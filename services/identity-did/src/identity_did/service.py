@@ -4,12 +4,16 @@ import hashlib
 import hmac
 import json
 import re
-from typing import Any, Callable
+from datetime import datetime, timezone
+from typing import Any, Callable, Protocol
 
+import vpp_common
 from vpp_common import ErrorCode, ServiceError
 
 from .repository import InMemoryRepository
 from .schemas import (
+    AuthorizationCreateRequest,
+    AuthorizationRecord,
     DeviceCreateRequest,
     DeviceRecord,
     IdentityVerifyRequest,
@@ -19,6 +23,20 @@ from .schemas import (
 
 
 PAYLOAD_HASH_PATTERN = re.compile(r"^sha256:[0-9a-fA-F]{64}$")
+
+
+class Clock(Protocol):
+    def now(self) -> datetime: ...
+
+    def now_iso(self) -> str: ...
+
+
+class SystemClock:
+    def now(self) -> datetime:
+        return datetime.now(timezone.utc)
+
+    def now_iso(self) -> str:
+        return vpp_common.utc_now_iso()
 
 
 class IdentityService:
@@ -123,3 +141,59 @@ class IdempotencyService:
             separators=(",", ":"),
         )
         return hashlib.sha256(f"{operation}:{canonical}".encode("utf-8")).hexdigest()
+
+
+class AuthorizationService:
+    def __init__(self, repository: InMemoryRepository, clock: Clock) -> None:
+        self.repository = repository
+        self.clock = clock
+
+    @staticmethod
+    def require_matching_caller(caller: str | None, expected: str) -> None:
+        if caller is not None and caller.strip() != expected:
+            raise ServiceError(ErrorCode.INVALID_DID)
+
+    def create_authorization(
+        self,
+        request: AuthorizationCreateRequest,
+    ) -> dict[str, Any]:
+        self._require_active_subject(request.requester_did)
+        self._require_active_subject(request.owner_did)
+
+        expire_at = request.expire_at
+        if (
+            expire_at.tzinfo is None
+            or expire_at.utcoffset() is None
+            or expire_at <= self.clock.now()
+        ):
+            raise ServiceError(ErrorCode.INVALID_TIMESTAMP)
+
+        normalized_expiry = (
+            expire_at.astimezone(timezone.utc)
+            .isoformat(timespec="milliseconds")
+            .replace("+00:00", "Z")
+        )
+        while True:
+            record = AuthorizationRecord(
+                authId=vpp_common.new_id("auth_"),
+                status="requested",
+                requesterDid=request.requester_did,
+                ownerDid=request.owner_did,
+                assetId=request.asset_id,
+                purpose=request.purpose,
+                expireAt=normalized_expiry,
+                decision=None,
+                reason=None,
+                approverDid=None,
+                createdAt=self.clock.now_iso(),
+                approvedAt=None,
+            )
+            saved = self.repository.create_authorization(record)
+            if saved is not None:
+                return saved.model_dump()
+
+    def _require_active_subject(self, subject_did: str) -> SubjectRecord:
+        subject = self.repository.get_subject(subject_did)
+        if subject is None or subject.status != "active":
+            raise ServiceError(ErrorCode.INVALID_DID)
+        return subject

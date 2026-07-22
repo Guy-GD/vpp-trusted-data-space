@@ -8,11 +8,18 @@ from vpp_common.schemas import HealthData
 
 from .repository import InMemoryRepository
 from .schemas import (
+    AuthorizationCreateRequest,
     DeviceCreateRequest,
     IdentityVerifyRequest,
     SubjectCreateRequest,
 )
-from .service import IdempotencyService, IdentityService
+from .service import (
+    AuthorizationService,
+    Clock,
+    IdempotencyService,
+    IdentityService,
+    SystemClock,
+)
 
 
 def normalize_idempotency_key(key: str | None) -> str | None:
@@ -24,10 +31,14 @@ def normalize_idempotency_key(key: str | None) -> str | None:
     return normalized
 
 
-def build_router(repository: InMemoryRepository) -> APIRouter:
+def build_router(
+    repository: InMemoryRepository,
+    clock: Clock | None = None,
+) -> APIRouter:
     router = APIRouter()
     service = IdentityService(repository)
     idempotency = IdempotencyService(repository)
+    authorization = AuthorizationService(repository, clock or SystemClock())
 
     @router.get("/health")
     def health():
@@ -80,6 +91,30 @@ def build_router(repository: InMemoryRepository) -> APIRouter:
             "identity.verify",
             request.model_dump(mode="json", by_alias=True),
             lambda: service.verify_identity(request),
+        )
+        return vpp_common.success(data)
+
+    @router.post("/api/v1/auth/requests")
+    def create_authorization(
+        request: AuthorizationCreateRequest,
+        idempotency_key: Annotated[
+            str | None,
+            Header(alias="Idempotency-Key"),
+        ] = None,
+        caller_did: Annotated[
+            str | None,
+            Header(alias="X-Caller-Did"),
+        ] = None,
+    ):
+        authorization.require_matching_caller(
+            caller_did,
+            request.requester_did,
+        )
+        data = idempotency.execute(
+            normalize_idempotency_key(idempotency_key),
+            "create-authorization",
+            request.model_dump(mode="json", by_alias=True),
+            lambda: authorization.create_authorization(request),
         )
         return vpp_common.success(data)
 

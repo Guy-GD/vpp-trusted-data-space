@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Annotated, Any, Literal
 
 from pydantic import (
@@ -51,6 +52,14 @@ class IdentityVerifyRequest(RequestSchema):
         if (self.subject_did is None) == (self.device_did is None):
             raise ValueError("exactly one of subjectDid or deviceDid is required")
         return self
+
+
+class AuthorizationCreateRequest(RequestSchema):
+    requester_did: NonEmptyString = Field(alias="requesterDid")
+    owner_did: NonEmptyString = Field(alias="ownerDid")
+    asset_id: NonEmptyString = Field(alias="assetId")
+    purpose: NonEmptyString
+    expire_at: datetime = Field(alias="expireAt")
 
 
 class StoredRecord(BaseModel):

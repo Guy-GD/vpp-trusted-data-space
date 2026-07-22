@@ -91,6 +91,22 @@ class InMemoryRepository:
             self.devices[device_did] = record
             return record
 
+    def get_subject(self, subject_did: str) -> SubjectRecord | None:
+        with self._lock:
+            record = self.subjects.get(subject_did)
+            return record.model_copy(deep=True) if record is not None else None
+
+    def create_authorization(
+        self,
+        record: AuthorizationRecord,
+    ) -> AuthorizationRecord | None:
+        with self._lock:
+            if record.authId in self.authorizations:
+                return None
+            stored = record.model_copy(deep=True)
+            self.authorizations[record.authId] = stored
+            return stored.model_copy(deep=True)
+
     def execute_idempotent(
         self,
         *,
