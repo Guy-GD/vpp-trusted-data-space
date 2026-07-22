@@ -3,6 +3,7 @@ from typing import Annotated
 from fastapi import APIRouter, Header
 
 import vpp_common
+from vpp_common import ErrorCode, ServiceError
 from vpp_common.schemas import HealthData
 
 from .repository import InMemoryRepository
@@ -12,6 +13,15 @@ from .schemas import (
     SubjectCreateRequest,
 )
 from .service import IdempotencyService, IdentityService
+
+
+def normalize_idempotency_key(key: str | None) -> str | None:
+    if key is None:
+        return None
+    normalized = key.strip()
+    if not normalized:
+        raise ServiceError(ErrorCode.INVALID_REQUEST)
+    return normalized
 
 
 def build_router(repository: InMemoryRepository) -> APIRouter:
@@ -34,7 +44,7 @@ def build_router(repository: InMemoryRepository) -> APIRouter:
         ] = None,
     ):
         data = idempotency.execute(
-            idempotency_key,
+            normalize_idempotency_key(idempotency_key),
             "identity.subjects.create",
             request.model_dump(mode="json", by_alias=True),
             lambda: service.register_subject(request),
@@ -50,7 +60,7 @@ def build_router(repository: InMemoryRepository) -> APIRouter:
         ] = None,
     ):
         data = idempotency.execute(
-            idempotency_key,
+            normalize_idempotency_key(idempotency_key),
             "identity.devices.create",
             request.model_dump(mode="json", by_alias=True),
             lambda: service.register_device(request),
@@ -66,7 +76,7 @@ def build_router(repository: InMemoryRepository) -> APIRouter:
         ] = None,
     ):
         data = idempotency.execute(
-            idempotency_key,
+            normalize_idempotency_key(idempotency_key),
             "identity.verify",
             request.model_dump(mode="json", by_alias=True),
             lambda: service.verify_identity(request),

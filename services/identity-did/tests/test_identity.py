@@ -460,6 +460,61 @@ def test_subject_idempotency_rejects_same_key_with_different_body(
     assert second.json()["code"] == 40901
 
 
+@pytest.mark.parametrize("blank_key", ["", "   \t"])
+def test_subject_rejects_blank_idempotency_key_without_polluting_next_request(
+    client: TestClient,
+    repository: InMemoryRepository,
+    blank_key: str,
+) -> None:
+    rejected = client.post(
+        "/api/v1/identity/subjects",
+        json={
+            "name": "Rejected blank-key subject",
+            "type": "operator",
+            "publicKey": PUBLIC_KEY,
+        },
+        headers={"Idempotency-Key": blank_key},
+    )
+    follow_up = client.post(
+        "/api/v1/identity/subjects",
+        json={
+            "name": "Normal subject after blank key",
+            "type": "operator",
+            "publicKey": PUBLIC_KEY,
+        },
+    )
+
+    assert rejected.status_code == 400
+    assert rejected.json()["code"] == 40001
+    assert follow_up.status_code == 200
+    assert follow_up.json()["data"]["subjectDid"] == "did:vpp:operator:002"
+    assert blank_key not in repository.idempotency
+
+
+def test_subject_idempotency_key_is_trimmed_before_replay(
+    client: TestClient,
+) -> None:
+    payload = {
+        "name": "Trimmed idempotency key",
+        "type": "operator",
+        "publicKey": PUBLIC_KEY,
+    }
+    first = client.post(
+        "/api/v1/identity/subjects",
+        json=payload,
+        headers={"Idempotency-Key": "  idem-trimmed  "},
+    )
+    second = client.post(
+        "/api/v1/identity/subjects",
+        json=payload,
+        headers={"Idempotency-Key": "idem-trimmed"},
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.json()["data"]["subjectDid"] == second.json()["data"]["subjectDid"]
+
+
 def test_device_idempotency_replays_same_device(client: TestClient) -> None:
     payload = {
         "deviceName": "Idempotent meter",
