@@ -1,4 +1,5 @@
 import base64
+import binascii
 import hashlib
 import hmac
 import json
@@ -66,8 +67,15 @@ class IdentityService:
         if PAYLOAD_HASH_PATTERN.fullmatch(request.payload_hash) is None:
             raise ServiceError(ErrorCode.INVALID_HASH)
 
-        expected = self.make_mock_signature(identity.publicKey, request.payload_hash)
-        if not hmac.compare_digest(request.signature, expected):
+        try:
+            signature = base64.b64decode(request.signature, validate=True)
+        except (binascii.Error, ValueError):
+            raise ServiceError(ErrorCode.INVALID_SIGNATURE) from None
+
+        expected = hashlib.sha256(
+            f"{identity.publicKey}:{request.payload_hash}".encode("utf-8")
+        ).digest()
+        if not hmac.compare_digest(signature, expected):
             raise ServiceError(ErrorCode.INVALID_SIGNATURE)
 
         subject_type = (

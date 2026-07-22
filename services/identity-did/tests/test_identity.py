@@ -333,6 +333,34 @@ def test_verify_rejects_invalid_signature(client: TestClient) -> None:
     assert response.json()["code"] == 40103
 
 
+def test_verify_rejects_non_ascii_signature(client: TestClient) -> None:
+    response = client.post(
+        "/api/v1/identity/verify",
+        json={
+            "subjectDid": "did:vpp:operator:001",
+            "signature": "签名",
+            "payloadHash": PAYLOAD_HASH,
+        },
+    )
+
+    assert response.status_code == 401
+    assert response.json()["code"] == 40103
+
+
+def test_verify_rejects_invalid_base64_signature(client: TestClient) -> None:
+    response = client.post(
+        "/api/v1/identity/verify",
+        json={
+            "subjectDid": "did:vpp:operator:001",
+            "signature": "%%%not-base64%%%",
+            "payloadHash": PAYLOAD_HASH,
+        },
+    )
+
+    assert response.status_code == 401
+    assert response.json()["code"] == 40103
+
+
 def test_verify_rejects_malformed_payload_hash(client: TestClient) -> None:
     response = client.post(
         "/api/v1/identity/verify",
