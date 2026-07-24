@@ -18,3 +18,11 @@ htmlcov/
 # Frontend
 apps/web-dashboard/node_modules/
 apps/web-dashboard/dist/
+
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+*.egg/
+.pytest_cache/
+.env
