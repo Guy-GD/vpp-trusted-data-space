@@ -1,0 +1,11 @@
+version: '3.8'
+
+services:
+  privacy-compute:
+    build:
+      context: ../../services/privacy-compute
+      dockerfile: Dockerfile
+    ports:
+      - "8001:8000"
+    environment:
+      - PYTHONUNBUFFERED=1
