@@ -45,6 +45,8 @@ python -m uvicorn identity_did.main:app --reload --port 8003
 - `did:vpp:renewable-plant:001`
 - `did:vpp:storage:001`
 
+四个预置主体共用同一个 Mock 公钥字符串：`bW9jay1wdWJsaWMta2V5`。Mock 验签直接使用这个 literal 字符串与 `":" + payloadHash` 拼接，然后计算 SHA-256；调用方不要先进行 Base64 解码。该字符串是公开的联调约定，不是秘密、私钥或生产凭据。
+
 ## 可重复正常路径演示
 
 先在一个终端启动端口 `8003` 的服务，再在仓库根目录的另一个终端运行：
