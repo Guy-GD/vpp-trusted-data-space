@@ -6,9 +6,14 @@ from threading import Barrier
 
 import pytest
 from fastapi.testclient import TestClient
+from vpp_common import ErrorCode, ServiceError
 
 from identity_did.repository import InMemoryRepository
-from identity_did.schemas import SubjectCreateRequest, SubjectRecord
+from identity_did.schemas import (
+    IdentityVerifyRequest,
+    SubjectCreateRequest,
+    SubjectRecord,
+)
 from identity_did.service import IdentityService
 
 
@@ -273,6 +278,22 @@ def test_verify_seed_subject_with_valid_mock_signature(client: TestClient) -> No
         "did": subject_did,
         "subjectType": "operator",
     }
+
+
+def test_verify_identity_rejects_missing_did_without_assert(
+    repository: InMemoryRepository,
+) -> None:
+    request = IdentityVerifyRequest.model_construct(
+        subject_did=None,
+        device_did=None,
+        signature="unused",
+        payload_hash=PAYLOAD_HASH,
+    )
+
+    with pytest.raises(ServiceError) as exc_info:
+        IdentityService(repository).verify_identity(request)
+
+    assert exc_info.value.code == ErrorCode.INVALID_REQUEST
 
 
 def test_verify_registered_device_returns_device_type(client: TestClient) -> None:

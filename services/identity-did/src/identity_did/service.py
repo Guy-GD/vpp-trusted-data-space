@@ -81,7 +81,8 @@ class IdentityService:
 
     def verify_identity(self, request: IdentityVerifyRequest) -> dict[str, Any]:
         did = request.subject_did or request.device_did
-        assert did is not None
+        if did is None:
+            raise ServiceError(ErrorCode.INVALID_REQUEST)
         identity = self.get_identity(did)
         if identity is None or identity.status != "active":
             raise ServiceError(ErrorCode.INVALID_DID)
