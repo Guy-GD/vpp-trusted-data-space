@@ -66,11 +66,11 @@ class TestIngestFailures:
         assert resp.status_code == 400
         assert resp.json()["code"] == 40001
 
-    def test_empty_readings_returns_422(self):
+    def test_empty_readings_returns_400(self):
         body = {**VALID_BODY, "readings": []}
         resp = client.post("/api/v1/data/ingest", json=body)
-        assert resp.status_code == 422
-        assert resp.json()["code"] == 42202
+        assert resp.status_code == 400
+        assert resp.json()["code"] == 40001
 
     def test_invalid_owner_did_returns_401(self):
         body = {**VALID_BODY, "ownerDid": "bad_did"}

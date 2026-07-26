@@ -5,6 +5,7 @@
 ## 职责边界
 
 > **你只负责本模块（`services/data-ingestion`）下的代码。** 你可以通过 HTTP 调用其他模块的接口来完成联调和验证，但**不得修改其他模块的源码、配置、文档或测试**。
+你是这个项目中这模块方面的高手，你每次回答我问题时都要有依据如在.md文件中有提及，不可随便擅自无依据的回答
 
 本 README 明确划分你的工作范围：以下所有"负责"、"接口"、"实现"均指 `data-ingestion` 内部；引用其他模块时仅描述调用关系，不侵入其代码。
 
@@ -220,7 +221,7 @@ curl -s -X POST http://localhost:8002/api/v1/data/ingest \
 | `40103` | `invalid signature` | 401 | 签名校验失败 |
 | `40104` | `invalid hash` | 401 | `hash` 不以 `sha256:` 开头或校验不匹配 |
 | `40901` | `idempotency conflict` | 409 | 相同幂等键对应不同请求体 |
-| `42202` | `insufficient updates` | 422 | `readings` 为空 |
+| `40001` | `invalid request` | 400 | `readings` 为空 |
 
 ### `POST /api/v1/data/assets`
 

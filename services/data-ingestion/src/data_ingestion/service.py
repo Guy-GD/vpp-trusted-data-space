@@ -47,7 +47,7 @@ def ingest(request: DataIngestRequest) -> IngestData:
 
     if not request.readings:
         raise ServiceError(
-            ErrorCode.INSUFFICIENT_UPDATES,
+            ErrorCode.INVALID_REQUEST,
             details=[{"field": "readings", "reason": "readings must not be empty"}],
         )
 

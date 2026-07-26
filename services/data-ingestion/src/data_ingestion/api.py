@@ -33,20 +33,12 @@ async def data_ingest(
     body: DataIngestRequest,
     idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
 ):
-    body_dict = await _body_dict(request)
-    body_hash = repo._hash_body(body_dict)
+    if not idempotency_key:
+        result: IngestData = ingest(body)
+        return success(result.model_dump(), trace_id=getattr(request.state, "trace_id", None))
 
-    # idempotency check
-    if idempotency_key:
-        cached = repo.idempotency_check(idempotency_key, body_hash)
-        if cached is not None:
-            return success(cached.model_dump(), trace_id=getattr(request.state, "trace_id", None))
-
-    result: IngestData = ingest(body)
-
-    if idempotency_key:
-        repo.idempotency_save(idempotency_key, body_hash, result)
-
+    body_hash = repo._hash_body(request.state.body_dict)
+    result: IngestData = repo.execute_idempotent(idempotency_key, body_hash, lambda: ingest(body))
     return success(result.model_dump(), trace_id=getattr(request.state, "trace_id", None))
 
 
@@ -58,19 +50,12 @@ async def data_assets(
     body: CreateAssetRequest,
     idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
 ):
-    body_dict = await _body_dict(request)
-    body_hash = repo._hash_body(body_dict)
+    if not idempotency_key:
+        result: AssetData = create_asset(body)
+        return success(result.model_dump(), trace_id=getattr(request.state, "trace_id", None))
 
-    if idempotency_key:
-        cached = repo.idempotency_check(idempotency_key, body_hash)
-        if cached is not None:
-            return success(cached.model_dump(), trace_id=getattr(request.state, "trace_id", None))
-
-    result: AssetData = create_asset(body)
-
-    if idempotency_key:
-        repo.idempotency_save(idempotency_key, body_hash, result)
-
+    body_hash = repo._hash_body(request.state.body_dict)
+    result: AssetData = repo.execute_idempotent(idempotency_key, body_hash, lambda: create_asset(body))
     return success(result.model_dump(), trace_id=getattr(request.state, "trace_id", None))
 
 
@@ -81,12 +66,3 @@ async def data_assets_query(request: Request, assetId: str):
     result = get_asset(assetId)
     return success(result.model_dump(), trace_id=getattr(request.state, "trace_id", None))
 
-
-# ---- helpers ----------------------------------------------------------------
-
-async def _body_dict(request: Request) -> dict:
-    """Re-read the raw body to get a plain dict for idempotency hashing."""
-    raw = await request.body()
-    import json
-
-    return json.loads(raw)

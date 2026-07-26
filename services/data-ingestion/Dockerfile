@@ -5,9 +5,12 @@ WORKDIR /app
 COPY packages/common /app/packages/common
 COPY services/data-ingestion /app/services/data-ingestion
 
+ARG PIP_INDEX_URL=https://pypi.org/simple/
+ARG PIP_TRUSTED_HOST=
+
 RUN pip install --no-cache-dir \
-    -i https://mirrors.aliyun.com/pypi/simple/ \
-    --trusted-host mirrors.aliyun.com \
+    -i ${PIP_INDEX_URL} \
+    ${PIP_TRUSTED_HOST:+--trusted-host ${PIP_TRUSTED_HOST}} \
     -e packages/common \
     -e "services/data-ingestion"
 
