@@ -24,6 +24,7 @@ from .schemas import (
 
 
 PAYLOAD_HASH_PATTERN = re.compile(r"^sha256:[0-9a-fA-F]{64}$")
+AUTHORIZATION_ID_MAX_ATTEMPTS = 3
 
 
 class Clock(Protocol):
@@ -81,7 +82,8 @@ class IdentityService:
 
     def verify_identity(self, request: IdentityVerifyRequest) -> dict[str, Any]:
         did = request.subject_did or request.device_did
-        assert did is not None
+        if did is None:
+            raise ServiceError(ErrorCode.INVALID_REQUEST)
         identity = self.get_identity(did)
         if identity is None or identity.status != "active":
             raise ServiceError(ErrorCode.INVALID_DID)
@@ -176,7 +178,7 @@ class AuthorizationService:
         if expire_at <= now:
             raise ServiceError(ErrorCode.INVALID_TIMESTAMP)
 
-        while True:
+        for _ in range(AUTHORIZATION_ID_MAX_ATTEMPTS):
             record = AuthorizationRecord(
                 authId=vpp_common.new_id("auth_"),
                 status="requested",
@@ -194,6 +196,7 @@ class AuthorizationService:
             saved = self.repository.create_authorization(record)
             if saved is not None:
                 return saved.model_dump()
+        raise ServiceError(ErrorCode.INTERNAL_ERROR)
 
     def get_authorization(self, auth_id: str) -> dict[str, Any]:
         now = self._current_time()

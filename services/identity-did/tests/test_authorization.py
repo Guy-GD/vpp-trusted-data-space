@@ -6,11 +6,12 @@ from typing import Any
 import pytest
 import vpp_common
 from fastapi.testclient import TestClient
+from vpp_common import ErrorCode, ServiceError
 
 from identity_did.main import create_app
 from identity_did.repository import InMemoryRepository
-from identity_did.schemas import AuthorizationRecord
-from identity_did.service import SystemClock
+from identity_did.schemas import AuthorizationCreateRequest, AuthorizationRecord
+from identity_did.service import AuthorizationService, SystemClock
 
 
 REQUESTER_DID = "did:vpp:operator:001"
@@ -275,7 +276,9 @@ def test_authorization_id_collision_retries_without_overwriting(
 ) -> None:
     existing = stored_authorization("auth_collision", "existing_purpose")
     assert repository.create_authorization(existing) is not None
-    generated_ids = iter(["auth_collision", "auth_after_collision"])
+    generated_ids = iter(
+        ["auth_collision", "auth_collision", "auth_after_collision"]
+    )
     monkeypatch.setattr(vpp_common, "new_id", lambda prefix: next(generated_ids))
     app = create_app(repository, clock)
 
@@ -289,6 +292,38 @@ def test_authorization_id_collision_retries_without_overwriting(
     assert response.json()["data"]["authId"] == "auth_after_collision"
     assert repository.authorizations["auth_collision"].purpose == "existing_purpose"
     assert len(repository.authorizations) == 2
+
+
+def test_authorization_id_collision_stops_after_three_attempts(
+    monkeypatch: pytest.MonkeyPatch,
+    repository: InMemoryRepository,
+    clock: Any,
+    future_expiry: str,
+) -> None:
+    existing = stored_authorization("auth_collision", "existing_purpose")
+    assert repository.create_authorization(existing) is not None
+    attempts = 0
+
+    def colliding_id(prefix: str) -> str:
+        nonlocal attempts
+        attempts += 1
+        if attempts <= 3:
+            return "auth_collision"
+        raise AssertionError("authorization ID retry was not bounded")
+
+    monkeypatch.setattr(vpp_common, "new_id", colliding_id)
+    service = AuthorizationService(repository, clock)
+    request = AuthorizationCreateRequest.model_validate(
+        authorization_payload(future_expiry)
+    )
+
+    with pytest.raises(ServiceError) as exc_info:
+        service.create_authorization(request)
+
+    assert exc_info.value.code == ErrorCode.INTERNAL_ERROR
+    assert attempts == 3
+    assert repository.authorizations["auth_collision"].purpose == "existing_purpose"
+    assert len(repository.authorizations) == 1
 
 
 def test_repository_and_response_authorizations_are_isolated_copies(
