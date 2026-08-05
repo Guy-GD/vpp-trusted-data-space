@@ -1,0 +1,5013 @@
+# Review package: d6edde183997ee5896f93af6e0ab52d658b96003..e12fad906f8b5040d16d280a71dd30cfe39b7d3d
+
+## Commits
+e12fad9 fix: close final contract review findings
+58d1501 test: validate contract HTTP methods
+13913b4 docs: harden week-one contract tests
+886cfc6 docs: freeze week-one module contracts
+5fe5520 fix: normalize HTTP exceptions in common package
+44235b3 feat: add common package and repository baseline
+e227852 docs: design sanitized week-one issue delivery
+4d1d42b docs: define week-one mock delivery design
+85f6e31 docs: improve development issue and PR templates
+bcd100f Merge pull request #2 from Guy-GD/feature/all-new
+f6dea2f designed have done
+
+## Files changed
+ .editorconfig                                      |   18 +
+ .gitattributes                                     |   12 +
+ .github/ISSUE_TEMPLATE/task.md                     |   60 +-
+ .github/pull_request_template.md                   |   57 +-
+ .gitignore                                         |   20 +
+ .nvmrc                                             |    1 +
+ .python-version                                    |    1 +
+ README.md                                          |   25 +
+ docs/api/openapi.md                                |  764 ++++++++++++
+ docs/api/response-and-errors.md                    |  214 ++++
+ docs/design/main-flow.md                           |  174 +++
+ docs/design/module-contracts.md                    | 1241 ++++++++++++++++++++
+ docs/design/week-one-mock-delivery.md              |  667 +++++++++++
+ ...-07-16-sanitized-week1-issue-delivery-design.md |  139 +++
+ packages/common/README.md                          |   44 +
+ packages/common/pyproject.toml                     |   23 +
+ packages/common/src/vpp_common/__init__.py         |   18 +
+ packages/common/src/vpp_common/errors.py           |   92 ++
+ packages/common/src/vpp_common/fastapi_support.py  |  145 +++
+ packages/common/src/vpp_common/id_generator.py     |   29 +
+ packages/common/src/vpp_common/response.py         |   58 +
+ packages/common/src/vpp_common/schemas.py          |   15 +
+ packages/common/src/vpp_common/time_utils.py       |    8 +
+ packages/common/src/vpp_common/tracing.py          |   32 +
+ packages/common/tests/test_fastapi_support.py      |  232 ++++
+ packages/common/tests/test_ids.py                  |   41 +
+ packages/common/tests/test_response.py             |  112 ++
+ packages/common/tests/test_tracing.py              |   25 +
+ tests/integration/test_contract_docs.py            |  496 ++++++++
+ 29 files changed, 4748 insertions(+), 15 deletions(-)
+
+## Diff
+diff --git a/.editorconfig b/.editorconfig
+new file mode 100644
+index 0000000..464e895
+--- /dev/null
++++ b/.editorconfig
+@@ -0,0 +1,18 @@
++root = true
++
++[*]
++charset = utf-8
++end_of_line = lf
++insert_final_newline = true
++trim_trailing_whitespace = true
++
++[*.{py,toml,yml,yaml}]
++indent_style = space
++indent_size = 4
++
++[*.{js,json,vue}]
++indent_style = space
++indent_size = 2
++
++[*.md]
++trim_trailing_whitespace = false
+diff --git a/.gitattributes b/.gitattributes
+new file mode 100644
+index 0000000..cfd71d9
+--- /dev/null
++++ b/.gitattributes
+@@ -0,0 +1,12 @@
++* text=auto eol=lf
++
++*.gif binary
++*.ico binary
++*.jpeg binary
++*.jpg binary
++*.onnx binary
++*.pdf binary
++*.pkl binary
++*.png binary
++*.webp binary
++*.zip binary
+diff --git a/.github/ISSUE_TEMPLATE/task.md b/.github/ISSUE_TEMPLATE/task.md
+index a1f8fd3..70b09e0 100644
+--- a/.github/ISSUE_TEMPLATE/task.md
++++ b/.github/ISSUE_TEMPLATE/task.md
+@@ -1,21 +1,61 @@
+-﻿---
++---
+ name: Task
+-description: 项目开发任务
+-title: "[模块] 任务名称"
++description: 开发功能任务（接口契约与联调）
++title: "[P0][模块名] 任务名称"
+ labels: []
+ assignees: []
+ ---
+ 
+-## 目标
++## 基本信息
++
++- 优先级：`P0` / `P1` / `P2` / `P3`
++- 所属模块：`api-gateway` / `meter-simulator` / `data-ingestion` / `identity-did` / `federated-learning` / `privacy-compute` / `ledger-service` / `ai-agent` / `web-dashboard` / `packages/common`
++- 负责人：@
++- 截止时间：
++- 依赖或阻塞：`无` / `#Issue编号`
++
++## 任务目标
++
++说明本任务要交付的可验证能力，而不是笼统描述整个模块。
++
++## 不在本任务范围
++
++明确本次不实现的能力，避免任务范围扩张。
++
++## 接口契约
++
++- [ ] 本任务不涉及 HTTP 接口变更。
++- [ ] 本任务新增或修改 HTTP 接口；请填写下表。
++
++| 调用方 | HTTP 方法与路径 | 请求关键字段 | 响应关键字段 | 错误码 | 契约来源 |
++|---|---|---|---|---|---|
++|  |  |  |  |  | `docs/api/openapi.md` |
++
++涉及路径、方法、字段、枚举、状态或错误码变更时，先更新 `docs/api/openapi.md`，再同步 `docs/design/module-contracts.md`；影响跨模块时序时同步 `docs/design/main-flow.md`；公共响应或错误码变化时同步 `docs/api/response-and-errors.md`。
++
++## 实现要求
+ 
+-## 输入
++- [ ] 后端服务提供 `GET /health`，并使用统一 `{ code, message, data, traceId }` 响应包络。
++- [ ] 写操作按契约处理 `Idempotency-Key`。
++- [ ] 服务间调用传递 `X-Trace-Id`；适用时传递 `X-Caller-Did`。
++- [ ] 前端只调用 `api-gateway`，不直连业务服务。
++- [ ] 不输出原始电表明文、未保护模型参数、密钥、令牌或敏感个人信息。
++- [ ] P0 任务使用稳定 Mock 数据打通链路，不提前实现未排期的真实算法。
+ 
+-## 输出
++不适用的项目请写明原因：
+ 
+-## 接口
++## 验收清单
+ 
+-## 验收标准
++- [ ] 正常路径已验证，结果符合 OpenAPI 字段和类型。
++- [ ] 至少一个失败路径已验证，错误码符合 `docs/api/response-and-errors.md`。
++- [ ] 涉及写操作时，已验证相同 `Idempotency-Key` 的重复请求行为。
++- [ ] 后端服务已验证 `GET /health`；前端已验证仅通过网关调用。
++- [ ] `api-gateway` 调用本模块接口的联调状态已说明。
++- [ ] 已说明本任务对 `docker-compose` 的影响：无影响 / 已更新 / 尚不适用。
+ 
+-## 负责人
++## 交付物
+ 
+-## 截止时间
++- [ ] 源码或前端页面。
++- [ ] 单元测试、接口测试或可复现的手工验证步骤。
++- [ ] 模块 README 中的启动与测试说明（如本任务首次引入该模块）。
++- [ ] 必要的契约文档更新。
+diff --git a/.github/pull_request_template.md b/.github/pull_request_template.md
+index 26f12f9..0bc3eee 100644
+--- a/.github/pull_request_template.md
++++ b/.github/pull_request_template.md
+@@ -1,11 +1,58 @@
+-﻿## 做了什么
+-
+ ## 关联 Issue
+ 
+ Closes #
+ 
+-## 如何测试
++## 模块与改动摘要
++
++- 所属模块：
++- 本次交付：
++- 不包含的内容：
++
++## 接口影响
++
++- [ ] 无接口变更。
++- [ ] 新增接口。
++- [ ] 修改既有接口。
++
++如涉及接口，请填写：
++
++| 调用方 | HTTP 方法与路径 | 请求关键字段 | 响应关键字段 | 错误码 |
++|---|---|---|---|---|
++|  |  |  |  |  |
++
++## 契约文档同步
++
++- [ ] 不涉及接口路径、方法、字段、枚举、状态或错误码变更。
++- [ ] 已更新 `docs/api/openapi.md`。
++- [ ] 已更新 `docs/design/module-contracts.md`。
++- [ ] 已更新 `docs/design/main-flow.md`（仅跨模块主流程或状态变化时）。
++- [ ] 已更新 `docs/api/response-and-errors.md`（仅统一响应、错误码或追踪/幂等规则变化时）。
++
++未更新但勾选不适用的原因：
++
++## 验证证据
++
++- 执行命令及结果：
++- 正常路径请求或截图：
++- 失败路径请求或截图：
++- [ ] 后端：已验证 `GET /health` 和统一 `{ code, message, data, traceId }` 响应。
++- [ ] 前端：已验证仅通过 `api-gateway` 访问后端能力。
++- [ ] 涉及写操作：已验证 `Idempotency-Key` 重试行为。
++
++## 联调与部署影响
++
++- 网关联调：未开始 / 已完成 / 不适用。
++- Mock 主流程：未开始 / 已通过 / 不适用。
++- `docker-compose`：无影响 / 已更新并验证 / 当前尚不适用。
++- 下游模块或数据依赖：
++
++## 数据安全与隐私检查
++
++- [ ] 未提交密钥、令牌、密码、`.env` 或真实凭据。
++- [ ] 未记录或返回原始电表明文、未保护模型参数或敏感个人信息。
++- [ ] 账本存证仅包含事件、摘要、URI 和审计元数据，不包含原始明文。
+ 
+-## 截图或日志
++## 风险与回滚
+ 
+-## 风险点
++- 已知限制或风险：
++- 回滚方式：
+diff --git a/.gitignore b/.gitignore
+new file mode 100644
+index 0000000..896a13c
+--- /dev/null
++++ b/.gitignore
+@@ -0,0 +1,20 @@
++# Ignore new local agent records; already tracked records remain versioned.
++docs/superpowers/
++.superpowers/
++
++# Local configuration and secrets
++.env
++.env.*
++!.env.example
++
++# Python
++.venv/
++**/__pycache__/
++**/.pytest_cache/
++**/*.egg-info/
++.coverage
++htmlcov/
++
++# Frontend
++apps/web-dashboard/node_modules/
++apps/web-dashboard/dist/
+diff --git a/.nvmrc b/.nvmrc
+new file mode 100644
+index 0000000..a45fd52
+--- /dev/null
++++ b/.nvmrc
+@@ -0,0 +1 @@
++24
+diff --git a/.python-version b/.python-version
+new file mode 100644
+index 0000000..2c07333
+--- /dev/null
++++ b/.python-version
+@@ -0,0 +1 @@
++3.11
+diff --git a/README.md b/README.md
+index 52238fe..191b85a 100644
+--- a/README.md
++++ b/README.md
+@@ -1,14 +1,39 @@
+ ﻿# vpp-trusted-data-space
+ 
+ 面向虚拟电厂跨主体交易的可信数据空间协同计算与审计平台。
+ 
++## 第一周技术基线（已冻结）
++
++后端统一采用 Python 3.11、FastAPI、Pydantic v2、Uvicorn、httpx 和 pytest；服务间协议固定为 HTTP/1.1 + JSON。公共依赖范围为 FastAPI `>=0.115,<1`、Pydantic `>=2,<3`、httpx `>=0.28,<1`、pytest `>=8,<9`，各模块必须在自己的依赖文件中锁定直接依赖，不得自行替换后端框架。
++
++前端统一采用 Node.js 24 LTS、Vue 3、Vite、JavaScript、Element Plus 和 Axios；第一周不引入 TypeScript、Pinia 或 Nuxt。`.python-version` 和 `.nvmrc` 是本地运行时基线。
++
++所有源码、配置、文档和测试文件统一使用 UTF-8、LF 换行。Windows PowerShell 读取中文文档时必须显式指定编码，例如：
++
++```powershell
++Get-Content -Encoding UTF8 README.md
++```
++
++模块对外通信只使用 `docs/api/openapi.md` 中的 HTTP 接口；统一响应、错误码、`traceId` 与 ID 前缀以 `docs/api/response-and-errors.md` 和 `packages/common` 为准。
++
++## 公共包
++
++使用 Python 3.11 在仓库根目录安装：
++
++```powershell
++python -m pip install -e "packages/common[test]"
++python -m pytest packages/common/tests tests/integration/test_contract_docs.py -v
++```
++
++八个后端必须安装 `vpp-common==0.1.0` 的仓库内版本，不得在各模块复制响应、错误码、追踪或 ID 生成逻辑。模块专属 DTO 继续保留在各模块内部。
++
+ ## 项目主线
+ 
+ 源端可信采集 + 联邦学习 + 同态加密/MPC 安全聚合 + 区块链审计 + Agent 交易决策。
+ 
+ ## 目录结构
+ 
+ - `apps/web-dashboard`: 前端可视化平台
+ - `services/api-gateway`: 统一 API 网关
+ - `services/meter-simulator`: 智能电表与采集终端模拟
+ - `services/identity-did`: DID 主体身份与授权
+diff --git a/docs/api/openapi.md b/docs/api/openapi.md
+new file mode 100644
+index 0000000..8b6e01d
+--- /dev/null
++++ b/docs/api/openapi.md
+@@ -0,0 +1,764 @@
++# vpp-trusted-data-space OpenAPI 接口契约
++
++> **文档职责**：本文档是系统 HTTP 接口的完整接口目录，覆盖 `docs/design/module-contracts.md` 列出的全部模块接口。它定义方法、路径、请求字段、响应字段、状态和调用示例；不改变模块职责和主流程。统一响应包络、错误码、追踪和幂等规则以 `docs/api/response-and-errors.md` 为单一来源。
++
++> **一致性规则**：新增或修改接口时，必须同时更新本文档和 `docs/design/module-contracts.md`。接口路径、HTTP 方法、字段名或错误码不一致时，以评审通过后的最新版本为准，禁止只修改代码。
++
++## 1. 基本约定
++
++- API 前缀：`/api/v1`。
++- 请求格式：`application/json`。
++- 所有服务提供 `GET /health`。
++- 时间字段使用 ISO 8601，例如 `2026-07-10T10:00:00+08:00`。
++- DID 使用字符串，例如 `did:vpp:load-aggregator:001`。
++- 哈希使用 `sha256:<hex>`，签名和密文使用 Base64 字符串。
++- 统一响应、错误码、追踪和幂等规则只引用 [公共响应与错误码](./response-and-errors.md)；本文档只定义端点的业务字段和示例。
++
++## 2. 公共契约引用
++
++统一响应包络、错误码、`traceId`、`Idempotency-Key` 和健康检查规则均以 [公共响应与错误码](./response-and-errors.md) 为准。端点的成功 `data` 示例只展示业务字段；例如一键演示的完整响应按第 4 节说明在公共包络中携带 `traceId`。
++
++## 3. 接口覆盖矩阵
++
++下表必须与 `module-contracts.md` 各模块“对外接口”章节一一对应。
++
++| 模块 | 方法 | 路径 |
++|---|---|---|
++| api-gateway | POST | `/api/v1/demo/run` |
++| api-gateway | GET | `/api/v1/demo/status/{businessId}` |
++| meter-simulator | POST | `/api/v1/meter/readings/generate` |
++| data-ingestion | POST | `/api/v1/data/ingest` |
++| data-ingestion | POST | `/api/v1/data/assets` |
++| data-ingestion | GET | `/api/v1/data/assets/{assetId}` |
++| identity-did | POST | `/api/v1/identity/subjects` |
++| identity-did | POST | `/api/v1/identity/devices` |
++| identity-did | POST | `/api/v1/identity/verify` |
++| identity-did | POST | `/api/v1/auth/requests` |
++| identity-did | POST | `/api/v1/auth/requests/{authId}/approve` |
++| identity-did | GET | `/api/v1/auth/requests/{authId}` |
++| federated-learning | POST | `/api/v1/fl/tasks` |
++| federated-learning | POST | `/api/v1/fl/tasks/{taskId}/start` |
++| federated-learning | POST | `/api/v1/fl/tasks/{taskId}/rounds/{roundId}/updates` |
++| federated-learning | POST | `/api/v1/fl/tasks/{taskId}/rounds/{roundId}/aggregate` |
++| federated-learning | GET | `/api/v1/fl/tasks/{taskId}` |
++| federated-learning | GET | `/api/v1/fl/tasks/{taskId}/metrics` |
++| federated-learning | GET | `/api/v1/fl/models/{modelVersion}` |
++| privacy-compute | POST | `/api/v1/privacy/model-updates/encrypt` |
++| privacy-compute | POST | `/api/v1/privacy/model-updates/mask` |
++| privacy-compute | POST | `/api/v1/privacy/secure-aggregate` |
++| privacy-compute | GET | `/api/v1/privacy/aggregates/{aggregateId}` |
++| ledger-service | POST | `/api/v1/ledger/events` |
++| ledger-service | GET | `/api/v1/ledger/events/{eventId}` |
++| ledger-service | GET | `/api/v1/ledger/traces/{businessId}` |
++| ai-agent | POST | `/api/v1/agent/predict` |
++| ai-agent | POST | `/api/v1/agent/trading-strategy` |
++| ai-agent | POST | `/api/v1/agent/audit-question` |
++| ai-agent | POST | `/api/v1/agent/audit-report` |
++| 所有服务 | GET | `/health` |
++
++## 4. api-gateway
++
++### `POST /api/v1/demo/run`
++
++启动完整演示流程，由网关依次调用采集、接入、身份授权、训练、隐私计算、存证和 Agent 模块。
++
++**请求说明**：JSON 请求体使用 `DemoRunRequest`，字段均来自请求体。
++
++**字段类型与必填性**：`scenario: string`、`participants: array<string>`、`meterCount: integer`、`trainingRounds: integer` 均必填。
++
++请求：
++
++```json
++{
++  "scenario": "vpp_day_ahead_trading",
++  "participants": ["did:vpp:load-aggregator:001", "did:vpp:renewable-plant:001", "did:vpp:storage:001"],
++  "meterCount": 3,
++  "trainingRounds": 3
++}
++```
++
++**成功说明**：`data` 为下列可解析 JSON，包含完整演示链路标识、指标与存证交易 ID。
++
++成功 `data`：
++
++```json
++{
++  "businessId": "demo_001",
++  "readingBatchId": "batch_001",
++  "assetId": "asset_001",
++  "authId": "auth_001",
++  "trainingTaskId": "fl_task_001",
++  "globalModelVersion": "global_model_v1",
++  "metrics": { "mae": 2.31, "rmse": 3.72, "mape": 0.081 },
++  "predictionId": "prediction_001",
++  "strategyId": "strategy_001",
++  "auditReportId": "report_001",
++  "ledgerTxIds": ["tx_data_001", "tx_auth_001", "tx_model_001", "tx_agent_001"]
++}
++```
++
++完整成功响应还必须在公共包络中包含与响应头 `X-Trace-Id` 相同的 `traceId`。`businessId`、模型指标、三个 Agent 结果标识和存证交易 ID 均为冻结字段。
++
++**可能错误**：仅引用[公共响应与错误码](./response-and-errors.md)中的请求校验、身份授权、状态冲突及下游错误。
++
++**幂等规则**：适用；调用方必须传 `Idempotency-Key`，相同 Key 与相同请求体复用首次结果，冲突按[公共响应与错误码](./response-and-errors.md)处理。
++
++### `GET /api/v1/demo/status/{businessId}`
++
++查询演示业务状态，不重复执行流程。成功 `data` 返回 `businessId`、`status`、`currentStage`、`lastEventType`、`globalModelVersion`、`retryable` 和 `error`。
++
++**请求说明**：`businessId` 来自路径；无请求体。
++
++**字段类型与必填性**：路径参数 `businessId: string` 必填。
++
++**成功说明**：`data` 为 object，包含 `businessId: string`、`status: string`、`currentStage: string`、`lastEventType: string|null`、`globalModelVersion: string|null`、`retryable: boolean`、`error: object|null`。
++
++**可能错误**：仅引用[公共响应与错误码](./response-and-errors.md)中的业务不存在和通用服务错误。
++
++**幂等规则**：不适用；该接口为只读查询。
++
++## 5. meter-simulator
++
++### `POST /api/v1/meter/readings/generate`
++
++请求：`meterId`、`ownerDid`、`count`、`intervalSeconds`。
++
++**请求说明**：JSON 请求体使用 `GenerateReadingsRequest`，字段均来自请求体。
++
++**字段类型与必填性**：`meterId: string`、`ownerDid: string`、`count: integer`、`intervalSeconds: integer` 均必填。
++
++**成功说明**：`data` 为下列 JSON；`readings` 是读数对象数组。
++
++成功 `data`：
++
++```json
++{
++  "readingBatchId": "batch_001",
++  "readings": [{
++    "readingId": "reading_001",
++    "meterId": "meter_001",
++    "ownerDid": "did:vpp:load-aggregator:001",
++    "ciphertext": "base64-ciphertext",
++    "signature": "base64-signature",
++    "hash": "sha256:abc123",
++    "timestamp": "2026-07-10T10:00:00+08:00"
++  }]
++}
++```
++
++**可能错误**：仅引用[公共响应与错误码](./response-and-errors.md)中的请求校验、DID 和服务错误。
++
++**幂等规则**：适用；相同 `Idempotency-Key` 与相同请求体返回同一 `readingBatchId`，冲突按[公共响应与错误码](./response-and-errors.md)处理。
++
++## 6. data-ingestion
++
++### `POST /api/v1/data/ingest`
++
++主流程使用本接口接收密文批次、完成签名与哈希校验，并同时登记数据资产。请求包含 `readingBatchId`、`ownerDid`、`readings[]`；每条 reading 至少包含 `readingId`、`meterId`、`ciphertext`、`signature`、`hash`、`timestamp`。
++
++**请求说明**：JSON 请求体使用 `DataIngestRequest`；所有字段来自请求体。
++
++**字段类型与必填性**：`readingBatchId: string`、`ownerDid: string`、`readings: array<object>` 必填；每项的 `readingId: string`、`meterId: string`、`ciphertext: string`、`signature: string`、`hash: string`、`timestamp: string(date-time)` 均必填。
++
++成功 `data`：`assetId`、`readingBatchId`、`ownerDid`、`assetType`、`sensitivityLevel`、`status`。
++
++**成功说明**：`data` 为 object，字段为 `assetId: string`、`readingBatchId: string`、`ownerDid: string`、`assetType: string`、`sensitivityLevel: string`、`status: string`。
++
++**可能错误**：仅引用[公共响应与错误码](./response-and-errors.md)中的请求校验、无效签名、无效哈希和状态冲突。
++
++**幂等规则**：适用；相同 `Idempotency-Key` 与相同批次返回同一 `assetId`，冲突按[公共响应与错误码](./response-and-errors.md)处理。
++
++### `POST /api/v1/data/assets`
++
++独立登记资产元信息，不属于第一周一键演示主流程，也不要求再次提交读数。请求至少包含 `readingBatchId`、`ownerDid`、`assetType`、`sensitivityLevel`、`purpose`；成功返回资产登记结果。
++
++**请求说明**：JSON 请求体使用 `CreateAssetRequest`；所有字段来自请求体。
++
++**字段类型与必填性**：`readingBatchId: string`、`ownerDid: string`、`assetType: string`、`sensitivityLevel: string`、`purpose: string` 均必填。
++
++**成功说明**：`data` 为 object，包含 `assetId: string`、上述资产元信息、`status: string` 与 `createdAt: string(date-time)`。
++
++**可能错误**：仅引用[公共响应与错误码](./response-and-errors.md)中的请求校验、DID、重复资源和服务错误。
++
++**幂等规则**：适用；相同 `Idempotency-Key` 与相同请求体复用首次资产登记结果，冲突按[公共响应与错误码](./response-and-errors.md)处理。
++
++### `GET /api/v1/data/assets/{assetId}`
++
++查询资产元信息；响应不得返回原始明文或未保护模型参数。成功返回 `assetId`、`ownerDid`、`assetType`、`sensitivityLevel`、`status`、`createdAt`。
++
++**请求说明**：`assetId` 来自路径；无请求体。
++
++**字段类型与必填性**：路径参数 `assetId: string` 必填。
++
++**成功说明**：`data` 为 object，包含 `assetId: string`、`ownerDid: string`、`assetType: string`、`sensitivityLevel: string`、`status: string`、`createdAt: string(date-time)`。
++
++**可能错误**：仅引用[公共响应与错误码](./response-and-errors.md)中的资源不存在、访问拒绝和服务错误。
++
++**幂等规则**：不适用；该接口为只读查询。
++
++## 7. identity-did
++
++### `POST /api/v1/identity/subjects`
++
++请求：`name`、`type`、`publicKey`。成功返回 `subjectDid`、`name`、`type`、`status`、`createdAt`。
++
++**请求说明**：JSON 请求体使用 `CreateSubjectRequest`；所有字段来自请求体。
++
++**字段类型与必填性**：`name: string`、`type: string`、`publicKey: string` 均必填。
++
++**成功说明**：`data` 为 object，包含 `subjectDid: string`、`name: string`、`type: string`、`status: string`、`createdAt: string(date-time)`。
++
++**可能错误**：仅引用[公共响应与错误码](./response-and-errors.md)中的请求校验、DID 和状态冲突错误。
++
++**幂等规则**：适用；相同 `Idempotency-Key` 与相同请求体返回同一 `subjectDid`，冲突按[公共响应与错误码](./response-and-errors.md)处理。
++
++### `POST /api/v1/identity/devices`
++
++请求：`deviceName`、`deviceType`、`ownerDid`、`publicKey`。成功返回 `deviceDid`、`ownerDid`、`status`、`createdAt`。
++
++**请求说明**：JSON 请求体使用 `CreateDeviceRequest`；所有字段来自请求体。
++
++**字段类型与必填性**：`deviceName: string`、`deviceType: string`、`ownerDid: string`、`publicKey: string` 均必填。
++
++**成功说明**：`data` 为 object，包含 `deviceDid: string`、`ownerDid: string`、`status: string`、`createdAt: string(date-time)`。
++
++**可能错误**：仅引用[公共响应与错误码](./response-and-errors.md)中的请求校验、DID 和状态冲突错误。
++
++**幂等规则**：适用；相同 `Idempotency-Key` 与相同请求体返回同一 `deviceDid`，冲突按[公共响应与错误码](./response-and-errors.md)处理。
++
++### `POST /api/v1/identity/verify`
++
++请求：`subjectDid` 或 `deviceDid`，以及验签所需的 `signature`、`payloadHash`。成功返回 `valid`、`did`、`subjectType`。
++
++**请求说明**：JSON 请求体使用 `VerifyIdentityRequest`；身份字段与验签字段均来自请求体。
++
++**字段类型与必填性**：`subjectDid: string` 与 `deviceDid: string` 二选一且必须提供一个；`signature: string`、`payloadHash: string` 必填。
++
++**成功说明**：`data` 为 object，包含 `valid: boolean`、`did: string`、`subjectType: string`。
++
++**可能错误**：仅引用[公共响应与错误码](./response-and-errors.md)中的 DID、签名、哈希和请求校验错误。
++
++**幂等规则**：适用；相同 `Idempotency-Key` 与相同请求体返回同一验证结果，冲突按[公共响应与错误码](./response-and-errors.md)处理。
++
++### `POST /api/v1/auth/requests`
++
++请求：`requesterDid`、`ownerDid`、`assetId`、`purpose`、`expireAt`。成功返回 `authId`、`status`、双方 DID、资产和用途。
++
++**请求说明**：JSON 请求体使用 `CreateAuthRequest`；所有字段来自请求体。
++
++**字段类型与必填性**：`requesterDid: string`、`ownerDid: string`、`assetId: string`、`purpose: string`、`expireAt: string(date-time)` 均必填。
++
++**成功说明**：`data` 为 object，包含 `authId: string`、`status: string`、请求双方 DID、`assetId: string`、`purpose: string`、`expireAt: string(date-time)`。
++
++**可能错误**：仅引用[公共响应与错误码](./response-and-errors.md)中的 DID、资源、时间和状态冲突错误。
++
++**幂等规则**：适用；相同 `Idempotency-Key` 与相同请求体返回同一 `authId`，冲突按[公共响应与错误码](./response-and-errors.md)处理。
++
++### `POST /api/v1/auth/requests/{authId}/approve`
++
++请求：`approverDid`，可选 `decision` 和 `reason`。成功返回授权记录及 `status: approved`。
++
++**请求说明**：`authId` 来自路径；JSON 请求体使用 `ApproveAuthRequest`，不得在请求体重复 `authId`。
++
++**字段类型与必填性**：路径参数 `authId: string` 必填；请求体 `approverDid: string` 必填，`decision: string`、`reason: string` 可选。
++
++**成功说明**：`data` 为 object，包含 `authId: string`、`status: string`、`approverDid: string`、`decision: string`、`reason: string|null`、`approvedAt: string(date-time)`。
++
++**可能错误**：仅引用[公共响应与错误码](./response-and-errors.md)中的授权不存在、DID、访问拒绝和状态冲突错误。
++
++**幂等规则**：适用；相同 `Idempotency-Key` 与相同审批请求复用首次结果，冲突按[公共响应与错误码](./response-and-errors.md)处理。
++
++### `GET /api/v1/auth/requests/{authId}`
++
++查询授权申请完整记录和当前状态。
++
++**请求说明**：`authId` 来自路径；无请求体。
++
++**字段类型与必填性**：路径参数 `authId: string` 必填。
++
++**成功说明**：`data` 为 object，包含授权申请字段、`status: string`、`decision: string|null`、`reason: string|null` 和创建/审批时间。
++
++**可能错误**：仅引用[公共响应与错误码](./response-and-errors.md)中的资源不存在、访问拒绝和服务错误。
++
++**幂等规则**：不适用；该接口为只读查询。
++
++## 8. federated-learning
++
++### `POST /api/v1/fl/tasks`
++
++请求字段：`taskName`、`modelType`、`algorithm`、`rounds`、`participants[]`、`assetIds[]`、`target`。成功返回 `trainingTaskId`、`status: created`、轮次和参与方。
++
++**请求说明**：JSON 请求体使用 `CreateTrainingTaskRequest`；所有字段来自请求体。
++
++**字段类型与必填性**：`taskName: string`、`modelType: string`、`algorithm: string`、`rounds: integer`、`participants: array<string>`、`assetIds: array<string>`、`target: string` 均必填。
++
++**成功说明**：`data` 为 object，包含 `trainingTaskId: string`、`status: string`、`rounds: integer`、`participants: array<string>`、`assetIds: array<string>`。
++
++**可能错误**：仅引用[公共响应与错误码](./response-and-errors.md)中的请求校验、训练配置、参与方和状态错误。
++
++**幂等规则**：适用；相同 `Idempotency-Key` 与相同请求体返回同一 `trainingTaskId`，冲突按[公共响应与错误码](./response-and-errors.md)处理。
++
++### `POST /api/v1/fl/tasks/{taskId}/start`
++
++启动任务并固定生成第 1 轮可交给隐私计算的更新摘要。
++
++**请求说明**：`taskId` 仅来自路径；无请求体。
++
++**字段类型与必填性**：路径参数 `taskId: string` 必填；无请求体字段。
++
++**成功说明**：`data` 为下列 JSON，返回第 1 轮 `currentRound` 和完整 `updates`。
++
++成功 `data`：
++
++```json
++{
++  "trainingTaskId": "fl_task_001",
++  "status": "running",
++  "currentRound": 1,
++  "updates": [
++    {
++      "participantDid": "did:vpp:load-aggregator:001",
++      "sampleCount": 500,
++      "modelUpdateUri": "storage://updates/fl_task_001/round_1/load_client.json",
++      "updateHash": "sha256:update001"
++    }
++  ]
++}
++```
++
++**可能错误**：仅引用[公共响应与错误码](./response-and-errors.md)中的训练任务不存在、参与方未就绪、训练配置和状态冲突错误。
++
++**幂等规则**：适用；相同 `Idempotency-Key` 与相同任务复用首次启动结果，冲突按[公共响应与错误码](./response-and-errors.md)处理。
++
++### `POST /api/v1/fl/tasks/{taskId}/rounds/{roundId}/updates`
++
++**请求说明**：`taskId`、`roundId` 仅来自路径；JSON 请求体使用 `SubmitModelUpdateRequest`，禁止重复这两个路径 ID。
++
++**字段类型与必填性**：路径参数 `taskId: string`、`roundId: integer` 必填；请求体 `participantDid: string`、`sampleCount: integer`、`modelUpdateUri: string(uri)`、`updateHash: string` 均必填。
++
++请求：
++
++```json
++{
++  "participantDid": "did:vpp:load-aggregator:001",
++  "sampleCount": 500,
++  "modelUpdateUri": "storage://updates/fl_task_001/round_1/load_client.json",
++  "updateHash": "sha256:update001"
++}
++```
++
++**成功说明**：`data` 为 object，包含 `participantDid: string`、`sampleCount: integer`、`status: string`、`acceptedAt: string(date-time)`；任务与轮次由路径确定。
++
++**可能错误**：仅引用[公共响应与错误码](./response-and-errors.md)中的任务不存在、无效哈希、更新不足和状态冲突错误。
++
++**幂等规则**：适用；相同 `Idempotency-Key` 与相同路径/请求体复用首次提交结果，冲突按[公共响应与错误码](./response-and-errors.md)处理。
++
++### `POST /api/v1/fl/tasks/{taskId}/rounds/{roundId}/aggregate`
++
++接收网关从 `privacy-compute` 取得的安全聚合结果并执行 FedAvg。
++
++**请求说明**：`taskId`、`roundId` 仅来自路径；JSON 请求体使用 `AggregateRoundRequest`，禁止重复这两个路径 ID。
++
++**字段类型与必填性**：路径参数 `taskId: string`、`roundId: integer` 必填；请求体 `aggregateId: string`、`aggregateResultUri: string(uri)`、`aggregateHash: string` 均必填。
++
++请求：
++
++```json
++{
++  "aggregateId": "aggregate_001",
++  "aggregateResultUri": "storage://aggregates/fl_task_001/round_3/result.json",
++  "aggregateHash": "sha256:agg001"
++}
++```
++
++**成功说明**：成功 `data` 在非最终轮返回 `status: running`、整数 `nextRound` 和下一轮完整 `updates`；最终轮返回 `status: completed`、`nextRound: null`、空 `updates` 及最终模型信息。
++
++非最终轮成功 `data`：
++
++```json
++{
++  "trainingTaskId": "fl_task_001",
++  "roundId": 1,
++  "status": "running",
++  "nextRound": 2,
++  "updates": [
++    {
++      "participantDid": "did:vpp:load-aggregator:001",
++      "sampleCount": 500,
++      "modelUpdateUri": "storage://updates/fl_task_001/round_2/load_client.json",
++      "updateHash": "sha256:update002"
++    }
++  ]
++}
++```
++
++最终轮成功 `data`：
++
++```json
++{
++  "trainingTaskId": "fl_task_001",
++  "roundId": 3,
++  "status": "completed",
++  "nextRound": null,
++  "updates": [],
++  "globalModelVersion": "global_model_v1",
++  "modelHash": "sha256:model123",
++  "participantCount": 3,
++  "metrics": { "mae": 2.31, "rmse": 3.72, "mape": 0.081 }
++}
++```
++
++**可能错误**：仅引用[公共响应与错误码](./response-and-errors.md)中的任务不存在、无效哈希、更新不足和状态冲突错误。
++
++**幂等规则**：适用；相同 `Idempotency-Key` 与相同路径/聚合结果复用该轮首次结果，冲突按[公共响应与错误码](./response-and-errors.md)处理。
++
++### `GET /api/v1/fl/tasks/{taskId}`
++
++返回任务状态、当前轮次、参与方、模型版本和最近错误。
++
++**请求说明**：`taskId` 来自路径；无请求体。
++
++**字段类型与必填性**：路径参数 `taskId: string` 必填。
++
++**成功说明**：`data` 为 object，包含 `trainingTaskId: string`、`status: string`、`currentRound: integer|null`、`participants: array<string>`、`globalModelVersion: string|null`、`lastError: object|null`。
++
++**可能错误**：仅引用[公共响应与错误码](./response-and-errors.md)中的训练任务不存在和服务错误。
++
++**幂等规则**：不适用；该接口为只读查询。
++
++### `GET /api/v1/fl/tasks/{taskId}/metrics`
++
++返回按轮次记录的 `mae`、`rmse`、`mape` 和样本数。
++
++**请求说明**：`taskId` 来自路径；无请求体。
++
++**字段类型与必填性**：路径参数 `taskId: string` 必填。
++
++**成功说明**：`data` 为 object，包含 `trainingTaskId: string` 与 `rounds: array<object>`；每项含 `roundId: integer`、`mae: number`、`rmse: number`、`mape: number`、`sampleCount: integer`。
++
++**可能错误**：仅引用[公共响应与错误码](./response-and-errors.md)中的训练任务不存在和服务错误。
++
++**幂等规则**：不适用；该接口为只读查询。
++
++### `GET /api/v1/fl/models/{modelVersion}`
++
++返回模型元信息、模型哈希、训练任务、轮次、指标和模型 URI；不得返回未授权的原始参数。
++
++**请求说明**：`modelVersion` 来自路径；无请求体。
++
++**字段类型与必填性**：路径参数 `modelVersion: string` 必填。
++
++**成功说明**：`data` 为 object，包含 `modelVersion: string`、`modelHash: string`、`trainingTaskId: string`、`roundId: integer`、`metrics: object`、`modelUri: string(uri)`。
++
++**可能错误**：仅引用[公共响应与错误码](./response-and-errors.md)中的模型版本不存在、访问拒绝和服务错误。
++
++**幂等规则**：不适用；该接口为只读查询。
++
++## 9. privacy-compute
++
++### `POST /api/v1/privacy/model-updates/encrypt`
++
++请求：`trainingTaskId`、`roundId`、`updates[]`、`algorithm`。成功返回加密更新摘要、结果 URI 和 `privacyMode: homomorphic_demo`。
++
++**请求说明**：JSON 请求体使用 `ProtectModelUpdatesRequest`；所有字段来自请求体。
++
++**字段类型与必填性**：`trainingTaskId: string`、`roundId: integer`、`updates: array<object>`、`algorithm: string` 均必填；每项更新包含必填的 `participantDid: string`、`sampleCount: integer`、`modelUpdateUri: string(uri)`、`updateHash: string`。
++
++**成功说明**：`data` 为 object，包含 `trainingTaskId: string`、`roundId: integer`、`protectedUpdates: array<object>`、`resultUri: string(uri)`、`privacyMode: string`（固定 `homomorphic_demo`）。
++
++**可能错误**：仅引用[公共响应与错误码](./response-and-errors.md)中的请求校验、无效哈希、更新不足和隐私模式错误。
++
++**幂等规则**：适用；相同 `Idempotency-Key` 与相同请求体复用首次保护结果，冲突按[公共响应与错误码](./response-and-errors.md)处理。
++
++### `POST /api/v1/privacy/model-updates/mask`
++
++请求结构与 encrypt 相同；成功返回安全掩码更新摘要、结果 URI 和 `privacyMode: secure_masking`。
++
++**请求说明**：JSON 请求体使用 `ProtectModelUpdatesRequest`；所有字段来自请求体。
++
++**字段类型与必填性**：`trainingTaskId: string`、`roundId: integer`、`updates: array<object>`、`algorithm: string` 均必填；每项更新包含必填的 `participantDid: string`、`sampleCount: integer`、`modelUpdateUri: string(uri)`、`updateHash: string`。
++
++**成功说明**：`data` 为 object，包含 `trainingTaskId: string`、`roundId: integer`、`protectedUpdates: array<object>`、`resultUri: string(uri)`、`privacyMode: string`（固定 `secure_masking`）。
++
++**可能错误**：仅引用[公共响应与错误码](./response-and-errors.md)中的请求校验、无效哈希、更新不足和隐私模式错误。
++
++**幂等规则**：适用；相同 `Idempotency-Key` 与相同请求体复用首次掩码结果，冲突按[公共响应与错误码](./response-and-errors.md)处理。
++
++### `POST /api/v1/privacy/secure-aggregate`
++
++请求字段：`trainingTaskId`、`roundId`、`updates[]`、`privacyMode`。
++
++**请求说明**：JSON 请求体使用 `SecureAggregateRequest`；所有字段来自请求体。
++
++**字段类型与必填性**：`trainingTaskId: string`、`roundId: integer`、`updates: array<object>`、`privacyMode: string` 均必填；每项更新包含必填的 `participantDid: string`、`sampleCount: integer`、`modelUpdateUri: string(uri)`、`updateHash: string`。
++
++请求：
++
++```json
++{
++  "trainingTaskId": "fl_task_001",
++  "roundId": 1,
++  "updates": [
++    {
++      "participantDid": "did:vpp:load-aggregator:001",
++      "sampleCount": 500,
++      "modelUpdateUri": "storage://updates/fl_task_001/round_1/load_client.json",
++      "updateHash": "sha256:update001"
++    }
++  ],
++  "privacyMode": "secure_masking"
++}
++```
++
++**成功说明**：`data` 为下列 JSON，包含聚合标识、结果 URI、摘要、参与方数量和隐私模式。
++
++成功 `data`：
++
++```json
++{
++  "aggregateId": "aggregate_001",
++  "trainingTaskId": "fl_task_001",
++  "roundId": 1,
++  "aggregateResultUri": "storage://aggregates/fl_task_001/round_1/result.json",
++  "aggregateHash": "sha256:agg001",
++  "participantCount": 3,
++  "privacyMode": "secure_masking"
++}
++```
++
++**可能错误**：仅引用[公共响应与错误码](./response-and-errors.md)中的请求校验、无效哈希、更新不足和不支持的隐私模式错误。
++
++**幂等规则**：适用；相同 `Idempotency-Key` 与相同请求体返回同一 `aggregateId`，冲突按[公共响应与错误码](./response-and-errors.md)处理。
++
++### `GET /api/v1/privacy/aggregates/{aggregateId}`
++
++返回聚合元信息、参与方数量、隐私模式、结果 URI 和摘要哈希；不返回单个参与方明文更新。
++
++**请求说明**：`aggregateId` 来自路径；无请求体。
++
++**字段类型与必填性**：路径参数 `aggregateId: string` 必填。
++
++**成功说明**：`data` 为 object，包含 `aggregateId: string`、`trainingTaskId: string`、`roundId: integer`、`aggregateResultUri: string(uri)`、`aggregateHash: string`、`participantCount: integer`、`privacyMode: string`。
++
++**可能错误**：仅引用[公共响应与错误码](./response-and-errors.md)中的资源不存在、访问拒绝和服务错误。
++
++**幂等规则**：不适用；该接口为只读查询。
++
++## 10. ledger-service
++
++### `POST /api/v1/ledger/events`
++
++请求字段：`eventType`、`businessId`、`subjectDid`、`payloadHash`、`payloadUri`、`description`、`metadata`。成功 `data` 返回 `ledgerTxId`、`eventId`、`blockHeight`、`currentHash`。
++
++**请求说明**：JSON 请求体使用 `CreateLedgerEventRequest`；所有字段来自请求体。
++
++**字段类型与必填性**：`eventType: string`、`businessId: string`、`subjectDid: string`、`payloadHash: string` 必填；`payloadUri: string(uri)`、`description: string`、`metadata: object` 可选。
++
++**成功说明**：`data` 为 object，包含 `ledgerTxId: string`、`eventId: string`、`blockHeight: integer`、`currentHash: string`、`previousHash: string|null`、`createdAt: string(date-time)`。
++
++**可能错误**：仅引用[公共响应与错误码](./response-and-errors.md)中的请求校验、无效 DID/哈希、重复事件和存储错误。
++
++**幂等规则**：适用；相同 `Idempotency-Key` 与相同事件复用首次存证结果，冲突按[公共响应与错误码](./response-and-errors.md)处理。
++
++### `GET /api/v1/ledger/events/{eventId}`
++
++返回单个事件、交易 ID、区块高度、当前哈希、前序哈希和元数据。
++
++**请求说明**：`eventId` 来自路径；无请求体。
++
++**字段类型与必填性**：路径参数 `eventId: string` 必填。
++
++**成功说明**：`data` 为 object，包含事件请求字段及 `eventId: string`、`ledgerTxId: string`、`blockHeight: integer`、`currentHash: string`、`previousHash: string|null`、`createdAt: string(date-time)`。
++
++**可能错误**：仅引用[公共响应与错误码](./response-and-errors.md)中的资源不存在、访问拒绝和服务错误。
++
++**幂等规则**：不适用；该接口为只读查询。
++
++### `GET /api/v1/ledger/traces/{businessId}`
++
++返回按时间排序的完整证据链：事件 ID、事件类型、时间、摘要哈希、交易 ID、区块高度和链路状态。
++
++**请求说明**：`businessId` 来自路径；无请求体。
++
++**字段类型与必填性**：路径参数 `businessId: string` 必填。
++
++**成功说明**：`data` 为 object，包含 `businessId: string`、`chainValid: boolean`、`events: array<object>`；事件按时间排序并含 ID、类型、时间、摘要、交易 ID、区块高度与前序/当前哈希。
++
++**可能错误**：仅引用[公共响应与错误码](./response-and-errors.md)中的业务不存在、访问拒绝和服务错误。
++
++**幂等规则**：不适用；该接口为只读查询。
++
++## 11. ai-agent
++
++### `POST /api/v1/agent/predict`
++
++请求：`modelVersion`、`scenario`、`input`。成功返回 `predictionId`、`modelVersion`、`predictedCapacityKw`、`confidence`。
++
++**请求说明**：JSON 请求体使用 `PredictRequest`；所有字段来自请求体。
++
++**字段类型与必填性**：`modelVersion: string`、`scenario: string`、`input: object` 均必填；`input` 中的场景特征值为 string、number 或 boolean。
++
++请求：
++
++```json
++{
++  "modelVersion": "global_model_v1",
++  "scenario": "day_ahead_trading",
++  "input": { "date": "2026-07-11", "temperature": 34, "marketPrice": 0.68 }
++}
++```
++
++**成功说明**：`data` 为下列可解析 JSON。
++
++成功 `data`：
++
++```json
++{
++  "predictionId": "prediction_001",
++  "modelVersion": "global_model_v1",
++  "predictedCapacityKw": 120000,
++  "confidence": 0.91
++}
++```
++
++**可能错误**：仅引用[公共响应与错误码](./response-and-errors.md)中的模型版本不存在、请求校验、访问拒绝和服务错误。
++
++**幂等规则**：适用；相同 `Idempotency-Key` 与相同请求体复用首次预测结果，冲突按[公共响应与错误码](./response-and-errors.md)处理。
++
++### `POST /api/v1/agent/trading-strategy`
++
++请求：`predictionId`、`scenario`、`marketPrice`、`riskPreference`。成功返回 `strategyId`、申报容量、价格建议、安全裕度和解释。
++
++**请求说明**：JSON 请求体使用 `TradingStrategyRequest`；所有字段来自请求体。
++
++**字段类型与必填性**：`predictionId: string`、`scenario: string`、`marketPrice: number`、`riskPreference: string` 均必填。
++
++请求：
++
++```json
++{
++  "predictionId": "prediction_001",
++  "scenario": "day_ahead_trading",
++  "marketPrice": 0.68,
++  "riskPreference": "balanced"
++}
++```
++
++**成功说明**：`data` 为下列可解析 JSON。
++
++成功 `data`：
++
++```json
++{
++  "strategyId": "strategy_001",
++  "bidCapacityKw": 108000,
++  "suggestedPrice": 0.7,
++  "safetyMargin": 0.1,
++  "explanation": "按预测容量保留 10% 安全裕度"
++}
++```
++
++**可能错误**：仅引用[公共响应与错误码](./response-and-errors.md)中的资源不存在、请求校验、状态冲突和服务错误。
++
++**幂等规则**：适用；相同 `Idempotency-Key` 与相同请求体复用首次策略结果，冲突按[公共响应与错误码](./response-and-errors.md)处理。
++
++### `POST /api/v1/agent/audit-question`
++
++请求字段：`businessId`、`modelVersion`、`evidenceEventIds[]`、`question`。
++
++**请求说明**：JSON 请求体使用 `AuditQuestionRequest`；账本证据 ID 由网关查询后放入请求体。
++
++**字段类型与必填性**：`businessId: string`、`modelVersion: string`、`evidenceEventIds: array<string>`、`question: string` 均必填。
++
++请求：
++
++```json
++{
++  "businessId": "demo_001",
++  "modelVersion": "global_model_v1",
++  "evidenceEventIds": ["evt_data_001", "evt_model_001"],
++  "question": "本次预测使用了哪个模型版本？"
++}
++```
++
++证据 ID 由网关查询账本后提供。
++
++**成功说明**：`data` 为下列可解析 JSON，实际引用的证据必须来自请求。
++
++成功 `data`：
++
++```json
++{
++  "answer": "本次预测使用 global_model_v1。",
++  "evidenceEventIds": ["evt_model_001"],
++  "modelVersion": "global_model_v1",
++  "confidence": 0.95
++}
++```
++
++**可能错误**：仅引用[公共响应与错误码](./response-and-errors.md)中的业务/模型不存在、访问拒绝、请求校验和服务错误。
++
++**幂等规则**：适用；相同 `Idempotency-Key` 与相同请求体复用首次回答，冲突按[公共响应与错误码](./response-and-errors.md)处理。
++
++### `POST /api/v1/agent/audit-report`
++
++请求字段：`businessId`、`modelVersion`、`evidenceEventIds[]`、`reportType`。
++
++**请求说明**：JSON 请求体使用 `AuditReportRequest`；账本证据 ID 由网关查询后放入请求体。
++
++**字段类型与必填性**：`businessId: string`、`modelVersion: string`、`evidenceEventIds: array<string>`、`reportType: string` 均必填。
++
++请求：
++
++```json
++{
++  "businessId": "demo_001",
++  "modelVersion": "global_model_v1",
++  "evidenceEventIds": ["evt_data_001", "evt_auth_001", "evt_model_001"],
++  "reportType": "transaction_audit"
++}
++```
++
++证据 ID 由网关查询账本后提供。
++
++**成功说明**：`data` 为下列可解析 JSON。
++
++成功 `data`：
++
++```json
++{
++  "auditReportId": "report_001",
++  "title": "虚拟电厂日前交易审计报告",
++  "summary": "本次交易使用 global_model_v1 完成可调节容量预测，参与主体 3 个，原始数据未出域，关键操作均已存证。",
++  "riskLevel": "low",
++  "recommendations": ["建议申报可调节容量 120MW", "建议保留 10% 安全裕度"]
++}
++```
++
++**可能错误**：仅引用[公共响应与错误码](./response-and-errors.md)中的业务/模型不存在、访问拒绝、请求校验和服务错误。
++
++**幂等规则**：适用；相同 `Idempotency-Key` 与相同请求体复用首次报告，冲突按[公共响应与错误码](./response-and-errors.md)处理。
++
++## 12. 所有服务健康检查
++
++### `GET /health`
++
++每个后端服务均提供该公共健康接口。
++
++**请求说明**：无路径参数或查询参数；无请求体。
++
++**字段类型与必填性**：无请求字段。
++
++**成功说明**：`data` 为 object，包含必填的 `service: string` 与 `status: string`；完整公共包络见[公共响应与错误码](./response-and-errors.md)。
++
++**可能错误**：未就绪时仅引用[公共响应与错误码](./response-and-errors.md)中的服务或依赖不可用错误。
++
++**幂等规则**：不适用；该接口为只读查询。
++
++## 13. 接口变更规则
++
++1. 修改路径、方法、字段、枚举、状态或错误码前，先修改本文档。
++2. 同步修改 `docs/design/module-contracts.md` 对应模块章节。
++3. 如果修改影响跨模块时序，再修改 `docs/design/main-flow.md`。
++4. 通过接口覆盖矩阵检查后，才能进入代码实现。
++5. 任何新增接口必须补充成功示例、至少一个失败示例和幂等说明。
+diff --git a/docs/api/response-and-errors.md b/docs/api/response-and-errors.md
+new file mode 100644
+index 0000000..788d970
+--- /dev/null
++++ b/docs/api/response-and-errors.md
+@@ -0,0 +1,214 @@
++# 公共响应格式与错误码
++
++> **文档职责**：本文档是 vpp-trusted-data-space 全部 HTTP 服务的公共协议单一来源，定义统一响应包络、错误码、HTTP 状态码、追踪字段和幂等约定。`docs/api/openapi.md` 负责引用这些规则并描述具体接口；`docs/design/module-contracts.md` 负责描述模块职责和接口边界，不能另行定义冲突的响应格式或错误码。
++
++## 1. 适用范围
++
++适用于 `api-gateway`、`meter-simulator`、`data-ingestion`、`identity-did`、`federated-learning`、`privacy-compute`、`ledger-service`、`ai-agent` 的所有业务接口和 `GET /health`。八个后端统一安装 `packages/common`，不得复制或自行修改响应、错误码、追踪和 ID 生成实现。
++
++接口路径、请求字段和模块边界以 `docs/api/openapi.md` 与 `docs/design/module-contracts.md` 为准；本文件只定义跨模块通用规则。
++
++## 2. 统一成功响应
++
++所有成功 HTTP 响应的实际 JSON 键集合固定为 `code`、`message`、`data`、`traceId`、`timestamp`，不得出现 `details` 或模块自定义根字段。
++
++成功响应示例：
++
++```json
++{
++  "code": 0,
++  "message": "ok",
++  "data": {},
++  "traceId": "trace_20260710_000001",
++  "timestamp": "2026-07-10T02:00:00Z"
++}
++```
++
++| 字段 | 类型 | 必填 | 说明 |
++|---|---|---:|---|
++| `code` | integer | 是 | 业务码；`0` 表示成功，非 `0` 表示失败。 |
++| `message` | string | 是 | 面向调用方的简短稳定说明。 |
++| `data` | object/array/null | 是 | 业务结果；无内容时固定为 `null`。 |
++| `traceId` | string | 是 | 请求链路追踪 ID；网关生成并向下游传递。 |
++| `timestamp` | string | 是 | UTC ISO 8601 响应时间。 |
++
++约定：
++
++1. 业务成功只返回 `code: 0`，不得用 HTTP 200 搭配非零 `code` 表示失败。
++2. `data` 结构由具体接口定义，不得把业务字段平铺到响应根部。
++3. `message` 固定为 `ok`，`success()` 不提供公开覆盖参数。
++4. `message` 不得包含密钥、明文电表数据、模型参数或内部堆栈。
++
++## 3. 统一错误响应
++
++失败响应示例：
++
++```json
++{
++  "code": 40001,
++  "message": "invalid request",
++  "data": null,
++  "traceId": "trace_20260710_000001",
++  "timestamp": "2026-07-10T02:00:00Z",
++  "details": [
++    { "field": "participants", "reason": "must not be empty" }
++  ]
++}
++```
++
++| 字段 | 类型 | 必填 | 说明 |
++|---|---|---:|---|
++| `code` | integer | 是 | 稳定业务错误码；客户端按错误码处理。 |
++| `message` | string | 是 | 稳定英文短语。 |
++| `data` | null | 是 | 错误时固定为 `null`。 |
++| `traceId` | string | 是 | 跨服务排查标识。 |
++| `timestamp` | string | 是 | UTC ISO 8601 响应时间。 |
++| `details` | array | 否 | 字段级校验或下游错误详情，不得泄露敏感数据。 |
++
++失败响应始终包含 `code`、`message`、`data: null`、`traceId`、`timestamp`。仅在存在字段级详情时返回 `details`；没有详情时实际 JSON 不得包含该键。`failure()` 与 `ServiceError` 的 `message` 始终来自下方冻结目录，不提供公开覆盖参数，也不得返回内部异常文本。
++
++## 4. HTTP 状态码映射
++
++| HTTP | 使用场景 | 典型业务码 |
++|---:|---|---|
++| `200` | 查询、生成、审批、聚合成功 | `0` |
++| `201` | 创建资源成功；MVP 可统一使用 `200` | `0` |
++| `400` | 请求体、参数或字段格式错误 | `40001`-`40005` |
++| `401` | 身份、签名或 DID 校验失败 | `40101`-`40104` |
++| `403` | 无资源权限或授权不可用 | `40301`-`40303` |
++| `404` | 资源不存在 | `40401`-`40404` |
++| `409` | 幂等冲突或状态冲突 | `40901`-`40903` |
++| `422` | 业务前置条件不满足 | `42201`-`42204` |
++| `429` | 限流或并发超限 | `42901` |
++| `500` | 当前服务内部错误 | `50001`-`50003` |
++| `502` | 网关收到下游失败 | `50201`-`50203` |
++| `503` | 服务或依赖未就绪 | `50301`-`50303` |
++| `504` | 下游调用超时 | `50401` |
++
++标准 HTTP 异常必须保留原 HTTP 状态。上表中的已知状态映射到最接近的冻结业务码；其他 `4xx` 使用 `40001`，其他 `5xx` 使用 `50001`。异常响应只按不区分大小写的白名单透传 `Allow`、`WWW-Authenticate`、`Retry-After`，不得透传 Cookie、内部调试头或任意自定义头；异常 `detail` 不进入响应体。
++
++## 5. 错误码目录
++
++### 5.1 通用请求错误 `400xx`
++
++| 错误码 | message | 说明 |
++|---:|---|---|
++| `40001` | `invalid request` | 请求参数不符合 Schema。 |
++| `40002` | `missing required field` | 缺少必填字段。 |
++| `40003` | `invalid timestamp` | 时间不是 ISO 8601 或超出业务范围。 |
++| `40004` | `invalid enum value` | 枚举值非法。 |
++| `40005` | `payload too large` | 请求内容超过限制。 |
++
++### 5.2 身份与签名错误 `401xx`
++
++| 错误码 | message | 说明 |
++|---:|---|---|
++| `40101` | `missing identity` | 未提供调用方身份。 |
++| `40102` | `invalid did` | DID 不存在、格式非法或状态不可用。 |
++| `40103` | `invalid signature` | 签名校验失败。 |
++| `40104` | `invalid hash` | 摘要与重新计算结果不一致。 |
++
++### 5.3 授权错误 `403xx`
++
++| 错误码 | message | 说明 |
++|---:|---|---|
++| `40301` | `access denied` | 调用方无权访问资源。 |
++| `40302` | `authorization required` | 数据资产或模型尚未授权。 |
++| `40303` | `authorization expired` | 授权已过期或撤销。 |
++
++### 5.4 资源与状态错误 `404xx`/`409xx`
++
++| 错误码 | message | 说明 |
++|---:|---|---|
++| `40401` | `resource not found` | 通用资源不存在。 |
++| `40402` | `business not found` | `businessId` 不存在。 |
++| `40403` | `training task not found` | 训练任务不存在。 |
++| `40404` | `model version not found` | 模型版本不存在。 |
++| `40901` | `idempotency conflict` | 同一幂等键对应不同请求体。 |
++| `40902` | `invalid resource state` | 当前资源状态不允许该操作。 |
++| `40903` | `duplicate event` | 相同事件已成功存证。 |
++
++### 5.5 业务前置条件 `422xx`
++
++| 错误码 | message | 说明 |
++|---:|---|---|
++| `42201` | `participants not ready` | 参与方、资产或授权未准备完成。 |
++| `42202` | `insufficient updates` | 当前轮次模型更新不足。 |
++| `42203` | `unsupported privacy mode` | 隐私计算模式不支持。 |
++| `42204` | `invalid training configuration` | 训练配置不合法。 |
++
++### 5.6 限流、服务与依赖错误
++
++| 错误码 | message | 说明 |
++|---:|---|---|
++| `42901` | `rate limit exceeded` | 请求频率或并发超限。 |
++| `50001` | `internal error` | 未分类内部错误。 |
++| `50002` | `storage error` | 存储读写失败。 |
++| `50003` | `serialization error` | 序列化失败。 |
++| `50201` | `downstream rejected` | 下游返回可识别失败。 |
++| `50202` | `downstream invalid response` | 下游响应不符合公共协议。 |
++| `50203` | `downstream unavailable` | 网关无法连接下游。 |
++| `50301` | `service unavailable` | 当前服务未就绪。 |
++| `50302` | `dependency unavailable` | 依赖未就绪。 |
++| `50303` | `maintenance mode` | 服务维护中。 |
++| `50401` | `downstream timeout` | 下游响应超时。 |
++
++## 6. 请求头、幂等和追踪
++
++| Header | 约定 |
++|---|---|
++| `Content-Type` | JSON 请求固定为 `application/json`。 |
++| `X-Trace-Id` | 网关保留合法入站值，否则生成 `trace_` 前缀 ID；下游、响应头和响应体沿用同一个值。 |
++| `Idempotency-Key` | 创建批次、资产、授权、训练任务、聚合和存证等写操作建议传入。 |
++| `X-Caller-Did` | 服务间调用时传入调用方 DID；与请求体 DID 不一致时返回 `40102`。 |
++
++幂等规则：相同 Key 重试返回首次结果；相同 Key 但请求体不同返回 HTTP `409`、业务码 `40901`；超时后不得生成新 Key 造成重复业务。
++
++### 6.1 `traceId` 冻结规则
++
++1. 合法值必须以 `trace_` 开头，只包含英文字母、数字、点、下划线、冒号或连字符，总长度不超过 128 个字符。
++2. `api-gateway` 收到合法的 `X-Trace-Id` 时原样保留；缺失或非法时生成新值。
++3. 网关调用所有下游时必须传递同一个 `X-Trace-Id`；业务服务不得为同一请求重新生成追踪 ID。
++4. 每个服务的响应头 `X-Trace-Id` 与响应体 `traceId` 必须相同，结构化日志也必须记录该值。
++5. `traceId` 只用于链路排查，不承载 DID、业务 ID、密钥、令牌或其他敏感内容。
++
++## 7. 统一 ID 前缀
++
++| 前缀 | 资源 |
++|---|---|
++| `demo_` | 一键演示业务 |
++| `batch_` | 电表读数批次 |
++| `reading_` | 单条电表读数 |
++| `asset_` | 数据资产 |
++| `auth_` | 授权申请 |
++| `fl_task_` | 联邦训练任务 |
++| `aggregate_` | 隐私聚合结果 |
++| `global_model_v` | 全局模型版本 |
++| `prediction_` | 预测结果 |
++| `strategy_` | 交易策略 |
++| `report_` | 审计报告 |
++| `evt_` | 存证事件 |
++| `tx_` | 存证交易 |
++| `trace_` | 链路追踪 |
++
++创建资源时统一调用 `vpp_common.new_id(prefix)`；未知前缀必须拒绝。ID 是不透明字符串，调用方不得依赖后缀长度、排序或数值连续性。
++
++## 8. 健康检查
++
++```http
++GET /health
++```
++
++健康时返回 HTTP `200`：
++
++```json
++{
++  "code": 0,
++  "message": "ok",
++  "data": { "service": "service-name", "status": "healthy" },
++  "traceId": "trace_20260710_000001",
++  "timestamp": "2026-07-10T02:00:00Z"
++}
++```
++
++服务未就绪时返回 HTTP `503`、业务码 `50301` 或 `50302`，仍必须使用统一错误包络。
+diff --git a/docs/design/main-flow.md b/docs/design/main-flow.md
+new file mode 100644
+index 0000000..2431fce
+--- /dev/null
++++ b/docs/design/main-flow.md
+@@ -0,0 +1,174 @@
++# 系统主流程与编排设计
++
++> **文档职责**：本文档描述虚拟电厂可信数据空间从源端采集到 Agent 业务输出的跨模块主流程，明确模块调用顺序、数据边界、存证节点、状态转换和失败处理。它不定义单个接口的完整字段；接口路径和 Schema 以 `docs/api/openapi.md` 为准，统一响应和错误码以 `docs/api/response-and-errors.md` 为准。
++
++## 1. 目标与边界
++
++系统围绕“源端可信、数据不出域、联邦训练、参数保护、模型可追溯、Agent 可解释”形成闭环：
++
++```text
++源端可信采集 -> 安全传输与数据资产登记 -> DID 身份校验与授权
++-> 本地训练与模型更新 -> 参数保护与安全聚合 -> FedAvg 全局模型
++-> 预测、交易策略和审计报告 -> 全链路存证与前端展示
++```
++
++系统边界：
++
++1. `apps/web-dashboard` 只访问 `services/api-gateway`。
++2. `api-gateway` 负责编排，不实现加密、联邦学习、MPC 或 Agent 算法。
++3. 业务模块通过固定 HTTP API 通信；所有模块提供 `GET /health`。
++4. 第一周仅 `api-gateway` 负责跨模块编排和调用 `ledger-service`；其他业务模块不得直接调用 `ledger-service`。
++5. 原始电表明文、主体本地训练数据和未保护模型参数不出主体本地数据域。
++6. `ledger-service` 只保存事件、摘要、引用地址和哈希链，不保存原始明文数据。
++
++## 2. 参与模块与责任
++
++| 模块 | 主流程责任 | 数据边界 |
++|---|---|---|
++| `api-gateway` | 接收演示请求、编排顺序、汇总结果、触发存证 | 不持久化原始电表数据和模型参数 |
++| `meter-simulator` | 生成电表数据、AES 加密、签名、SHA-256 摘要 | 明文只在源端处理 |
++| `data-ingestion` | 验签、验哈希、登记数据资产 | 保存密文及元信息，不解密原始数据 |
++| `identity-did` | 管理主体/设备 DID、授权申请和审批 | 保存身份、公钥与授权状态 |
++| `federated-learning` | 本地训练、模型更新、FedAvg、版本与指标 | 每个客户端只读自己的本地分片 |
++| `privacy-compute` | 加密演示、安全掩码、MPC 风格聚合、参数摘要 | 不拥有本地原始训练数据 |
++| `ledger-service` | 关键事件存证、哈希链、按业务查询证据 | 只保存摘要、URI 和审计元数据 |
++| `ai-agent` | 预测、交易策略、审计问答、报告生成 | 通过网关使用模型与证据链 |
++| `web-dashboard` | 一键演示、状态展示、报告展示 | 不直连业务模块 |
++
++## 3. 一键演示主流程
++
++入口：`POST /api/v1/demo/run`。
++
++```mermaid
++sequenceDiagram
++    autonumber
++    participant UI as web-dashboard
++    participant GW as api-gateway
++    participant Meter as meter-simulator
++    participant DID as identity-did
++    participant Ingest as data-ingestion
++    participant FL as federated-learning
++    participant Privacy as privacy-compute
++    participant Ledger as ledger-service
++    participant Agent as ai-agent
++    UI->>GW: POST /api/v1/demo/run
++    GW->>Meter: POST /api/v1/meter/readings/generate
++    Meter-->>GW: ciphertext + signature + hash
++    GW->>Ledger: meter_data_collected
++    GW->>DID: POST /api/v1/identity/verify
++    DID-->>GW: DID verified
++    GW->>Ingest: POST /api/v1/data/ingest
++    Ingest-->>GW: assetId
++    GW->>Ledger: data_asset_registered
++    GW->>DID: POST /api/v1/auth/requests
++    DID-->>GW: authId requested
++    GW->>DID: POST /api/v1/auth/requests/{authId}/approve
++    DID-->>GW: authId approved
++    GW->>Ledger: auth_approved
++    GW->>FL: POST /api/v1/fl/tasks
++    FL-->>GW: trainingTaskId
++    GW->>FL: POST /api/v1/fl/tasks/{taskId}/start
++    FL-->>GW: currentRound=1 + updates
++    loop 每个训练轮次
++        GW->>Privacy: POST /api/v1/privacy/secure-aggregate
++        Privacy-->>GW: aggregateId + aggregateResultUri + aggregateHash
++        GW->>FL: POST /api/v1/fl/tasks/{taskId}/rounds/{roundId}/aggregate
++        FL-->>GW: status + nextRound + updates / final modelHash + metrics
++        GW->>Ledger: secure_aggregation_finished
++    end
++    GW->>Ledger: global_model_created
++    GW->>Agent: POST /api/v1/agent/predict
++    Agent-->>GW: prediction
++    GW->>Agent: POST /api/v1/agent/trading-strategy
++    Agent-->>GW: strategy
++    GW->>Agent: POST /api/v1/agent/audit-report
++    Agent-->>GW: auditReportId + report
++    GW->>Ledger: agent_prediction_called / agent_report_generated
++    GW-->>UI: demo summary in unified response
++```
++
++## 4. 分阶段输入、输出和存证
++
++### 4.1 源端采集与数据接入
++
++1. 网关向 `meter-simulator` 请求指定数量和时间间隔的读数。
++2. 源端为每条读数生成 `ciphertext`、`signature`、`hash`、`timestamp` 和批次 ID。
++3. 网关记录 `meter_data_collected`，再向 `data-ingestion` 提交密文批次。
++4. 数据接入服务验证签名和哈希，登记 `assetId`。
++5. 网关记录 `data_asset_registered`，返回 `readingBatchId` 和 `assetId`。
++
++原始数据边界：网关、数据接入、账本和 Agent 只能看到密文、摘要或元信息；明文只存在于源端或主体本地分片处理环节。
++
++### 4.2 身份与授权
++
++1. 网关调用 `POST /api/v1/identity/verify` 验证主体 DID 和设备 DID。
++2. 验证成功后创建授权申请，绑定请求方、所有者、资产、用途和过期时间。
++3. MVP 演示由网关调用审批接口完成审批；生产环境应由资源所有者或独立审批方触发。
++4. 审批成功后记录 `auth_requested` 和 `auth_approved`，训练只能使用有效授权。
++
++### 4.3 联邦学习与隐私计算
++
++1. 网关创建训练任务并声明参与方、资产、目标、算法和轮次。
++2. 联邦学习服务在单服务内模拟多个本地客户端，每个客户端只加载自己的数据分片。
++3. `POST .../start` 固定返回第 1 轮 `currentRound: 1` 和完整 `updates[]`；每项包含 `participantDid`、`sampleCount`、`modelUpdateUri`、`updateHash`，不上传原始数据。
++4. `POST .../rounds/{roundId}/updates` 的 `taskId`、`roundId` 只来自路径；请求体只包含 `participantDid`、`sampleCount`、`modelUpdateUri`、`updateHash`。
++5. 每轮都由网关先把当前 `updates` 交给 `POST /api/v1/privacy/secure-aggregate`，再把返回的 `aggregateId`、`aggregateResultUri`、`aggregateHash` 交给 FL aggregate 执行 FedAvg。FL aggregate 的请求体只包含这三个字段；`taskId`、`roundId` 只来自路径。
++6. 非最终轮 FL aggregate 返回 `status: running`、整数 `nextRound` 和下一轮完整 `updates[]`，网关据此继续下一轮 secure-aggregate 与 FL aggregate。
++7. 最终轮 FL aggregate 返回 `status: completed`、`nextRound: null`、`updates: []`，并返回最终 `globalModelVersion`、`modelHash`、`metrics`（MAE、RMSE、MAPE）。
++8. 网关将训练开始、参数提交、每轮安全聚合、最终模型生成和评估事件交给账本存证；业务服务不直接写账本。
++
++### 4.4 Agent 业务输出
++
++1. Agent 使用指定或最新 `global_model_vN` 生成预测。
++2. Agent 根据预测、市场价格和场景生成交易策略建议。
++3. 网关查询账本证据链后提供 `evidenceEventIds`；Agent 基于该证据引用生成审计问答或报告，不直接调用账本服务。
++4. 网关记录 Agent 调用与报告生成事件，并将结果汇总给前端。
++
++## 5. 状态与幂等
++
++演示业务状态：
++
++```text
++CREATED -> COLLECTING -> DATA_REGISTERED -> AUTHORIZED -> TRAINING
++-> MODEL_READY -> AGENT_COMPLETED -> COMPLETED
++```
++
++任意状态可进入 `FAILED`；失败任务可进入 `RETRYING` 后回到原状态或再次失败。`GET /api/v1/demo/status/{businessId}` 只查询状态，不重复执行流程。
++
++`traceId`、幂等键和错误码的统一规则以 [公共响应与错误码](../api/response-and-errors.md) 为准；本流程不重复定义这些公共契约。
++
++## 6. 失败处理与补偿
++
++| 阶段 | 失败示例 | 网关处理 | 是否继续 |
++|---|---|---|---|
++| 源端采集 | 模拟器不可用、参数非法 | 标记 `FAILED`，按原 Key 重试 | 否 |
++| 数据接入 | 验签失败、哈希不匹配 | 返回公共契约定义的校验错误，记录失败事件 | 否 |
++| 授权 | DID 不存在、授权过期 | 返回公共契约定义的授权错误，不创建训练任务 | 否 |
++| 本地训练 | 参与方未就绪、样本不足 | 保留任务状态，返回公共契约定义的训练错误 | 否 |
++| 安全聚合 | 模式不支持、更新不足 | 当前轮次失败，可重试该轮次 | 否 |
++| 存证 | 账本不可用 | 不宣称流程完成，返回公共契约定义的依赖错误 | 否 |
++| Agent | 模型不存在、报告失败 | 单独标记 Agent 失败，允许重新调用 | 按产品策略 |
++
++不删除已完成的采集、授权、训练轮次和模型版本；补偿动作使用同一 `businessId`、`traceId` 和错误码。
++
++## 7. 最终汇总结果
++
++成功时 `POST /api/v1/demo/run` 的 `data` 至少包含：
++
++```json
++{
++  "businessId": "demo_001",
++  "readingBatchId": "batch_001",
++  "assetId": "asset_001",
++  "authId": "auth_001",
++  "trainingTaskId": "fl_task_001",
++  "globalModelVersion": "global_model_v1",
++  "metrics": { "mae": 2.31, "rmse": 3.72, "mape": 0.081 },
++  "predictionId": "prediction_001",
++  "strategyId": "strategy_001",
++  "auditReportId": "report_001",
++  "ledgerTxIds": ["tx_data_001", "tx_auth_001", "tx_model_001", "tx_agent_001"]
++}
++```
++
++完整响应的公共包络还包含与响应头相同的 `traceId`。前端只依赖汇总结果、`traceId` 和状态查询，不依赖下游模块内部存储地址或算法实现。
+diff --git a/docs/design/module-contracts.md b/docs/design/module-contracts.md
+new file mode 100644
+index 0000000..2ff0f05
+--- /dev/null
++++ b/docs/design/module-contracts.md
+@@ -0,0 +1,1241 @@
++# 模块化架构与接口契约说明
++
++本文档用于指导团队基于“虚拟电厂跨主体数据协同交易与审计”场景开展模块化开发。所有成员使用 Agent 写代码时，必须先阅读本文档，并严格按照模块职责、输入输出和接口契约实现。
++
++> **相关文档职责**：本文档负责模块边界、职责、输入输出和模块级接口清单；`docs/design/main-flow.md` 负责跨模块主流程、状态、存证节点和失败处理；`docs/api/openapi.md` 负责所有 HTTP 接口的完整路径、字段和示例；`docs/api/response-and-errors.md` 负责统一响应包络、错误码、HTTP 状态码、追踪和幂等规则。三份文档必须保持一致，接口变更先更新 `openapi.md`，再同步本文件。
++
++## 1. 总体原则
++
++本系统采用“统一编排 + 模块化能力服务”的方式实现完整链路。
++
++核心原则：
++
++1. 前端只调用 `api-gateway`，不直接调用各业务模块。
++2. 第一周仅 `api-gateway` 负责跨模块编排和调用 `ledger-service`；其他业务模块不得直接调用 `ledger-service`。
++3. 每个模块只负责自己的能力边界，对外暴露固定 HTTP API。
++4. 每个模块必须提供 `GET /health` 健康检查接口。
++5. 统一响应、错误码、追踪和幂等规则只引用 [`docs/api/response-and-errors.md`](../api/response-and-errors.md)。
++6. 关键操作由 `api-gateway` 调用 `ledger-service` 进行存证。
++7. 第一阶段先实现 Mock 版本跑通链路，再逐步替换真实算法。
++8. 任何接口字段修改，必须先更新 `docs/api/openapi.md` 并经技术负责人确认。
++
++统一响应、错误码、追踪、幂等和健康检查规则均以 [`docs/api/response-and-errors.md`](../api/response-and-errors.md) 为准；各模块仅列出自身对外接口和业务字段。
++
++## 2. 模块总览
++
++| 编号 | 模块 | 目录 | 核心职责 | 主要调用方 |
++|---|---|---|---|---|
++| 0 | 统一编排模块 | `services/api-gateway` | 编排完整业务链路，提供演示总入口 | `web-dashboard` |
++| 1 | 源端可信采集模块 | `services/meter-simulator` | 模拟电表数据、源端加密、签名、哈希 | `api-gateway` |
++| 2 | 安全传输与数据接入模块 | `services/data-ingestion` | 接收密文数据、验签、登记数据资产 | `api-gateway` |
++| 3 | DID 与授权模块 | `services/identity-did` | 主体身份、设备身份、授权申请与审批 | `api-gateway` |
++| 4 | 联邦学习模块 | `services/federated-learning` | 真实轻量本地训练、模型参数上传、FedAvg 聚合、模型版本与指标管理 | `api-gateway` |
++| 5 | 隐私计算模块 | `services/privacy-compute` | 同态加密参数保护、MPC/安全掩码聚合、参数摘要 | `api-gateway` |
++| 6 | 区块链存证模块 | `services/ledger-service` | 关键操作、数据哈希、模型版本、Agent 调用存证 | `api-gateway` |
++| 7 | Agent 业务模块 | `services/ai-agent` | 预测、交易策略、审计问答、报告生成 | `api-gateway` |
++| 8 | 前端展示模块 | `apps/web-dashboard` | 系统可视化、链路展示、报告展示 | 用户 / `api-gateway` |
++| 9 | 公共包模块 | `packages/common` | 统一响应、错误码、`traceId`、UTC 时间、冻结 ID、基础 Schema | 所有后端模块 |
++
++## 3. 完整业务链路
++
++第一周的所有跨模块箭头均由 `api-gateway` 发起；业务模块只处理网关传入的请求并将结果返回网关。主流程为：
++
++```text
++前端点击“开始演示”
++  -> api-gateway 接收请求
++  -> api-gateway 调用 meter-simulator 生成电表数据、加密、签名、哈希
++  -> api-gateway 调用 ledger-service 记录数据哈希存证
++  -> api-gateway 调用 identity-did 校验设备 DID 与主体 DID
++  -> api-gateway 调用 data-ingestion 接收密文数据并登记数据资产
++  -> api-gateway 调用 identity-did 创建并审批授权申请
++  -> api-gateway 调用 ledger-service 记录授权存证
++  -> api-gateway 调用 federated-learning 启动本地训练并生成模型参数
++  -> api-gateway 调用 ledger-service 记录训练轮次存证
++  -> api-gateway 调用 privacy-compute 对参数进行同态加密/安全掩码/MPC 安全聚合
++  -> api-gateway 调用 ledger-service 记录参数摘要和聚合结果存证
++  -> api-gateway 调用 federated-learning 执行 FedAvg 并生成 global_model_vN
++  -> api-gateway 调用 ledger-service 记录模型版本存证
++  -> api-gateway 向 ai-agent 提供模型与账本证据引用，生成预测、交易策略、审计报告
++  -> api-gateway 调用 ledger-service 记录 Agent 调用存证
++  -> api-gateway 汇总结果返回前端
++```
++
++主流程和状态规则见 [`docs/design/main-flow.md`](./main-flow.md)。主流程总入口：
++
++```http
++POST /api/v1/demo/run
++```
++
++公共响应包络、错误码、追踪和幂等规则见 [`docs/api/response-and-errors.md`](../api/response-and-errors.md)。以下仅展示 `POST /api/v1/demo/run` 的业务 `data`：
++
++返回示例：
++
++```json
++{
++  "businessId": "demo_001",
++  "readingBatchId": "batch_001",
++  "assetId": "asset_001",
++  "authId": "auth_001",
++  "trainingTaskId": "fl_task_001",
++  "globalModelVersion": "global_model_v1",
++  "metrics": { "mae": 2.31, "rmse": 3.72, "mape": 0.081 },
++  "predictionId": "prediction_001",
++  "strategyId": "strategy_001",
++  "auditReportId": "report_001",
++  "ledgerTxIds": [
++    "tx_data_hash_001",
++    "tx_auth_001",
++    "tx_training_001",
++    "tx_param_001",
++    "tx_model_001",
++    "tx_agent_001"
++  ]
++}
++```
++
++## 4. 模块 0：统一编排模块
++
++目录：`services/api-gateway`
++
++### 功能与职责
++
++`api-gateway` 是系统的主控模块，负责把各独立模块串成完整业务流程。
++
++它负责：
++
++1. 接收前端请求。
++2. 调用各业务模块。
++3. 控制完整演示流程顺序。
++4. 收集各模块返回结果。
++5. 调用 `ledger-service` 完成关键事件存证。
++6. 将完整链路结果返回给前端。
++
++它不负责：
++
++1. 不实现具体加密算法。
++2. 不实现联邦学习算法。
++3. 不直接保存原始电表数据。
++4. 不直接生成 AI 报告内容。
++
++### 输入
++
++来自前端的业务请求，例如：
++
++```json
++{
++  "scenario": "vpp_day_ahead_trading",
++  "participants": [
++    "did:vpp:load-aggregator:001",
++    "did:vpp:renewable-plant:001",
++    "did:vpp:storage:001"
++  ],
++  "meterCount": 3,
++  "trainingRounds": 3
++}
++```
++
++### 输出
++
++完整业务链路结果，包括数据批次、授权、训练任务、模型版本、存证交易、Agent 报告等。
++
++### 具体操作
++
++1. 调用 `meter-simulator` 生成源端可信数据。
++2. 调用 `ledger-service` 记录数据哈希。
++3. 调用 `identity-did` 校验 DID。
++4. 调用 `data-ingestion` 登记数据资产。
++5. 调用 `identity-did` 发起和审批授权。
++6. 调用 `federated-learning` 创建训练任务。
++7. 调用 `privacy-compute` 加密参数并安全聚合。
++8. 调用 `federated-learning` 生成全局模型。
++9. 调用 `ai-agent` 生成预测、策略和审计报告。
++10. 调用 `ledger-service` 记录关键事件。
++
++### 封装内容
++
++建议封装：
++
++```text
++clients/meter_client.py
++clients/identity_client.py
++clients/ingestion_client.py
++clients/fl_client.py
++clients/privacy_client.py
++clients/ledger_client.py
++clients/agent_client.py
++workflows/demo_workflow.py
++```
++
++第一周主流程调用 `POST /api/v1/data/ingest`，该接口验签、验哈希并直接返回新建的 `assetId`。`POST /api/v1/data/assets` 是不提交读数的独立资产元信息登记接口，仍需实现，但不参与一键演示主流程。
++
++### 对外接口
++
++```http
++POST /api/v1/demo/run
++GET /api/v1/demo/status/{businessId}
++GET /health
++```
++
++## 5. 模块 1：源端可信采集模块
++
++目录：`services/meter-simulator`
++
++### 功能与职责
++
++模拟智能电表或采集终端，完成电表数据生成、源端加密、数字签名、时间戳和哈希。
++
++它负责：
++
++1. 模拟生成用电数据。
++2. 使用 AES 对数据内容加密。
++3. 使用设备私钥对数据摘要签名。
++4. 生成 SHA-256 哈希。
++5. 生成时间戳和批次 ID。
++
++它不负责：
++
++1. 不负责长期保存数据。
++2. 不负责数据资产登记。
++3. 不负责链上存证。
++4. 不负责联邦学习训练。
++
++### 输入
++
++```json
++{
++  "meterId": "meter_001",
++  "ownerDid": "did:vpp:load-aggregator:001",
++  "count": 10,
++  "intervalSeconds": 5
++}
++```
++
++### 输出
++
++```json
++{
++  "readingBatchId": "batch_001",
++  "readings": [
++    {
++      "readingId": "reading_001",
++      "meterId": "meter_001",
++      "ownerDid": "did:vpp:load-aggregator:001",
++      "ciphertext": "base64-ciphertext",
++      "signature": "base64-signature",
++      "hash": "sha256:abc123",
++      "timestamp": "2026-07-10T10:00:00+08:00"
++    }
++  ]
++}
++```
++
++### 具体操作
++
++1. 生成明文用电数据，例如功率、电压、电流。
++2. 将明文数据序列化为 JSON。
++3. 使用 AES 加密 JSON。
++4. 对密文和时间戳计算 SHA-256 哈希。
++5. 使用设备私钥签名哈希。
++6. 返回密文、签名、哈希和时间戳。
++
++### 封装内容
++
++```text
++generate_reading()
++generate_batch()
++encrypt_reading()
++sign_reading()
++hash_reading()
++```
++
++### 对外接口
++
++```http
++POST /api/v1/meter/readings/generate
++GET /health
++```
++
++## 6. 模块 2：安全传输与数据接入模块
++
++目录：`services/data-ingestion`
++
++### 功能与职责
++
++接收源端密文数据，完成签名校验、数据元信息登记和数据资产目录发布。
++
++它负责：
++
++1. 接收密文电表数据。
++2. 校验数据签名和哈希。
++3. 保存数据元信息。
++4. 登记数据资产。
++5. 标记数据敏感级别和用途。
++
++它不负责：
++
++1. 不负责生成电表数据。
++2. 不负责授权审批。
++3. 不负责模型训练。
++4. 不负责链上存证。
++
++### 输入
++
++```json
++{
++  "readingBatchId": "batch_001",
++  "ownerDid": "did:vpp:load-aggregator:001",
++  "readings": [
++    {
++      "readingId": "reading_001",
++      "meterId": "meter_001",
++      "ciphertext": "base64-ciphertext",
++      "signature": "base64-signature",
++      "hash": "sha256:abc123",
++      "timestamp": "2026-07-10T10:00:00+08:00"
++    }
++  ]
++}
++```
++
++### 输出
++
++```json
++{
++  "assetId": "asset_001",
++  "readingBatchId": "batch_001",
++  "ownerDid": "did:vpp:load-aggregator:001",
++  "assetType": "meter_readings",
++  "sensitivityLevel": "private",
++  "status": "registered"
++}
++```
++
++### 具体操作
++
++1. 接收 `meter-simulator` 输出的数据批次。
++2. 根据 DID 公钥校验签名。
++3. 重新计算哈希并与传入哈希比对。
++4. 生成数据资产 ID。
++5. 保存数据资产元信息。
++6. 返回资产登记结果。
++
++### 封装内容
++
++```text
++receive_encrypted_data()
++verify_signature()
++verify_hash()
++register_data_asset()
++get_asset_metadata()
++```
++
++### 对外接口
++
++```http
++POST /api/v1/data/ingest
++POST /api/v1/data/assets
++GET /api/v1/data/assets/{assetId}
++GET /health
++```
++
++## 7. 模块 3：DID 与授权模块
++
++目录：`services/identity-did`
++
++### 功能与职责
++
++管理参与主体、设备身份和数据使用授权流程。
++
++它负责：
++
++1. 注册主体 DID。
++2. 注册设备 DID。
++3. 校验主体身份。
++4. 发起数据授权申请。
++5. 审批或拒绝授权申请。
++6. 查询授权状态。
++
++它不负责：
++
++1. 不负责保存原始电表数据。
++2. 不负责训练模型。
++3. 不负责存证实现。
++4. 不负责前端页面展示。
++
++### 输入
++
++主体注册：
++
++```json
++{
++  "name": "负荷聚合商 A",
++  "type": "load_aggregator",
++  "publicKey": "base64-public-key"
++}
++```
++
++授权申请：
++
++```json
++{
++  "requesterDid": "did:vpp:operator:001",
++  "ownerDid": "did:vpp:load-aggregator:001",
++  "assetId": "asset_001",
++  "purpose": "federated_training_for_day_ahead_trading",
++  "expireAt": "2026-08-01T00:00:00+08:00"
++}
++```
++
++### 输出
++
++```json
++{
++  "authId": "auth_001",
++  "status": "approved",
++  "requesterDid": "did:vpp:operator:001",
++  "ownerDid": "did:vpp:load-aggregator:001",
++  "assetId": "asset_001"
++}
++```
++
++### 具体操作
++
++1. 生成 DID 标识。
++2. 绑定主体类型和公钥。
++3. 校验请求方身份。
++4. 创建授权申请。
++5. 审批授权申请。
++6. 返回授权结果。
++
++### 封装内容
++
++```text
++register_subject()
++register_device()
++verify_did()
++create_auth_request()
++approve_auth_request()
++get_auth_status()
++```
++
++### 对外接口
++
++```http
++POST /api/v1/identity/subjects
++POST /api/v1/identity/devices
++POST /api/v1/identity/verify
++POST /api/v1/auth/requests
++POST /api/v1/auth/requests/{authId}/approve
++GET /api/v1/auth/requests/{authId}
++GET /health
++```
++
++## 8. 模块 4：联邦学习模块
++
++目录：`services/federated-learning`
++
++### 功能与职责
++
++负责实现轻量真实联邦学习 MVP，包括多主体本地训练、模型参数上传、FedAvg 聚合、全局模型版本管理和模型指标评估。
++
++本项目需要真实联邦学习，但不做复杂生产级联邦学习平台。第一版采用“单服务内模拟多本地客户端”的方式实现，保证可运行、可解释、可演示。
++
++它负责：
++
++1. 创建联邦学习任务。
++2. 为负荷聚合商、新能源场站、储能运营方模拟本地训练客户端。
++3. 每个本地客户端只读取自己的本地数据分片。
++4. 训练轻量模型并生成本地模型参数或梯度。
++5. 接收或生成各主体模型更新摘要。
++6. 向 `api-gateway` 返回模型更新摘要，由网关调用 `privacy-compute` 执行参数保护或安全聚合。
++7. 执行 FedAvg 生成全局模型。
++8. 维护 `global_model_vN` 模型版本。
++9. 输出 MAE、RMSE、MAPE 等模型效果指标。
++10. 为 Agent 提供最新模型预测能力。
++
++它不负责：
++
++1. 不负责源端数据加密和签名。
++2. 不负责 DID 授权审批。
++3. 不负责同态加密和 MPC 算法本身。
++4. 不直接写链，由 `api-gateway` 调用 `ledger-service` 存证。
++5. 不第一阶段引入复杂跨机器训练框架。
++
++### 真实联邦学习 MVP 范围
++
++第一版建议范围：
++
++```text
++任务：虚拟电厂日前负荷预测 / 可调节容量预测
++参与方：3 个主体
++主体：负荷聚合商、新能源场站、储能运营方
++模型：线性回归、轻量 MLP 或可解释的简单回归模型
++轮次：3-5 轮
++聚合算法：FedAvg
++指标：MAE、RMSE、MAPE
++部署：单服务内模拟多客户端，后续再拆为多服务或多机器
++```
++
++不建议第一版实现：
++
++```text
++复杂深度神经网络
++完整工业级联邦学习平台
++真实生产电力数据接入
++全量同态加密训练
++十几个节点跨机器训练
++```
++
++### 内部子组件
++
++建议内部结构：
++
++```text
++services/federated-learning/
++  server/
++    task_manager        训练任务管理
++    aggregator          FedAvg 聚合
++    model_registry      模型版本管理
++    metrics             MAE/RMSE/MAPE 指标计算
++  clients/
++    load_client         负荷聚合商本地训练节点
++    renewable_client    新能源场站本地训练节点
++    storage_client      储能运营方本地训练节点
++  data/
++    local_partitions    各主体本地数据分片
++```
++
++### 输入
++
++创建训练任务：
++
++```json
++{
++  "taskName": "虚拟电厂日前负荷预测联邦训练",
++  "modelType": "load_forecast",
++  "algorithm": "fedavg",
++  "rounds": 3,
++  "participants": [
++    "did:vpp:load-aggregator:001",
++    "did:vpp:renewable-plant:001",
++    "did:vpp:storage:001"
++  ],
++  "assetIds": ["asset_001", "asset_002", "asset_003"],
++  "target": "adjustable_capacity_kw"
++}
++```
++
++本地参数上传请求：
++
++```json
++{
++  "participantDid": "did:vpp:load-aggregator:001",
++  "sampleCount": 500,
++  "modelUpdateUri": "storage://updates/fl_task_001/round_1/load_client.json",
++  "updateHash": "sha256:update001"
++}
++```
++
++该请求用于 `POST /api/v1/fl/tasks/{taskId}/rounds/{roundId}/updates`；`taskId`、`roundId` 只来自路径，禁止在请求体重复。
++
++### 输出
++
++创建任务输出：
++
++```json
++{
++  "trainingTaskId": "fl_task_001",
++  "status": "created",
++  "rounds": 3,
++  "participants": [
++    "did:vpp:load-aggregator:001",
++    "did:vpp:renewable-plant:001",
++    "did:vpp:storage:001"
++  ]
++}
++```
++
++启动任务输出：
++
++```json
++{
++  "trainingTaskId": "fl_task_001",
++  "status": "running",
++  "currentRound": 1,
++  "updates": [
++    {
++      "participantDid": "did:vpp:load-aggregator:001",
++      "sampleCount": 500,
++      "modelUpdateUri": "storage://updates/fl_task_001/round_1/load_client.json",
++      "updateHash": "sha256:update001"
++    }
++  ]
++}
++```
++
++FedAvg 聚合请求：
++
++```json
++{
++  "aggregateId": "aggregate_001",
++  "aggregateResultUri": "storage://aggregates/fl_task_001/round_1/result.json",
++  "aggregateHash": "sha256:agg001"
++}
++```
++
++非最终轮聚合输出：
++
++```json
++{
++  "trainingTaskId": "fl_task_001",
++  "roundId": 1,
++  "status": "running",
++  "nextRound": 2,
++  "updates": [
++    {
++      "participantDid": "did:vpp:load-aggregator:001",
++      "sampleCount": 500,
++      "modelUpdateUri": "storage://updates/fl_task_001/round_2/load_client.json",
++      "updateHash": "sha256:update002"
++    }
++  ]
++}
++```
++
++最终轮聚合输出：
++
++```json
++{
++  "trainingTaskId": "fl_task_001",
++  "roundId": 3,
++  "status": "completed",
++  "nextRound": null,
++  "updates": [],
++  "globalModelVersion": "global_model_v1",
++  "modelHash": "sha256:model123",
++  "participantCount": 3,
++  "metrics": {
++    "mae": 2.31,
++    "rmse": 3.72,
++    "mape": 0.081
++  }
++}
++```
++
++### 具体操作
++
++1. 创建联邦学习任务。
++2. 根据参与方 DID 加载各主体本地数据分片。
++3. 初始化全局模型参数。
++4. 每轮将当前全局模型下发给本地客户端。
++5. 各本地客户端在本地数据上训练，生成模型参数更新。
++6. 计算每个本地更新的哈希和样本数。
++7. 将参数更新摘要返回给 `api-gateway`，由网关调用 `privacy-compute`。
++8. 每轮接收网关传回的 `aggregateId`、`aggregateResultUri` 和 `aggregateHash`；FL aggregate 请求体只含这三个字段，任务与轮次 ID 只来自路径。
++9. 执行 FedAvg 得到新一轮全局模型；非最终轮返回 `status: running`、整数 `nextRound` 和下一轮完整 `updates[]`。
++10. 最终轮计算 MAE、RMSE、MAPE，生成模型版本号和模型哈希。
++11. 最终轮返回 `status: completed`、`nextRound: null`、`updates: []` 以及最终 `globalModelVersion`、`modelHash`、`metrics`。
++12. 将每轮结果返回 `api-gateway`，由网关继续执行下一轮 privacy secure-aggregate 或进入后续流程。
++
++### 封装内容
++
++```text
++create_training_task()
++start_training()
++load_local_partition()
++start_local_training()
++generate_model_update()
++submit_model_update()
++collect_model_updates()
++fedavg_aggregate()
++evaluate_model()
++publish_global_model()
++get_model_version()
++get_training_metrics()
++```
++
++### 对外接口
++
++```http
++POST /api/v1/fl/tasks
++POST /api/v1/fl/tasks/{taskId}/start
++POST /api/v1/fl/tasks/{taskId}/rounds/{roundId}/updates
++POST /api/v1/fl/tasks/{taskId}/rounds/{roundId}/aggregate
++GET /api/v1/fl/tasks/{taskId}
++GET /api/v1/fl/tasks/{taskId}/metrics
++GET /api/v1/fl/models/{modelVersion}
++GET /health
++```
++
++### 与其他模块关系
++
++1. `api-gateway` 调用本模块创建任务和启动训练。
++2. 本模块将模型参数摘要返回给 `api-gateway`，由网关调用 `privacy-compute` 处理并传回聚合结果。
++3. `api-gateway` 将训练开始、参数提交、模型生成等事件交给 `ledger-service` 存证。
++4. `ai-agent` 通过 `api-gateway` 使用最新 `global_model_vN` 完成预测和报告生成。
++## 9. 模块 5：隐私计算模块
++
++目录：`services/privacy-compute`
++
++### 功能与职责
++
++负责模型参数上传前的隐私保护、安全聚合和参数摘要生成。
++
++它负责：
++
++1. 对模型参数进行同态加密演示。
++2. 对模型参数添加安全掩码。
++3. 执行 MPC 风格安全聚合。
++4. 生成参数摘要哈希。
++5. 输出安全聚合结果。
++
++它不负责：
++
++1. 不负责本地模型训练。
++2. 不负责最终模型版本管理。
++3. 不负责授权审批。
++4. 不负责 Agent 报告。
++
++### 输入
++
++```json
++{
++  "trainingTaskId": "fl_task_001",
++  "roundId": 1,
++  "updates": [
++    {
++      "participantDid": "did:vpp:load-aggregator:001",
++      "sampleCount": 500,
++      "modelUpdateUri": "storage://updates/fl_task_001/round_1/sub_001.json",
++      "updateHash": "sha256:update001"
++    }
++  ],
++  "privacyMode": "secure_masking"
++}
++```
++
++### 输出
++
++```json
++{
++  "aggregateId": "aggregate_001",
++  "trainingTaskId": "fl_task_001",
++  "roundId": 1,
++  "aggregateResultUri": "storage://aggregates/fl_task_001/round_1/result.json",
++  "aggregateHash": "sha256:agg001",
++  "participantCount": 3,
++  "privacyMode": "secure_masking"
++}
++```
++
++### 具体操作
++
++1. 接收各主体模型参数摘要和参数地址。
++2. 对参数进行同态加密或安全掩码处理。
++3. 执行安全聚合。
++4. 生成聚合结果文件。
++5. 计算聚合结果哈希。
++6. 返回聚合结果摘要。
++
++### 封装内容
++
++```text
++encrypt_model_update()
++mask_model_update()
++generate_update_hash()
++secure_aggregate()
++mpc_secure_aggregate()
++verify_aggregate_result()
++```
++
++### 对外接口
++
++```http
++POST /api/v1/privacy/model-updates/encrypt
++POST /api/v1/privacy/model-updates/mask
++POST /api/v1/privacy/secure-aggregate
++GET /api/v1/privacy/aggregates/{aggregateId}
++GET /health
++```
++
++## 10. 模块 6：区块链存证模块
++
++目录：`services/ledger-service`
++
++### 功能与职责
++
++负责记录关键操作和关键数据摘要，形成完整审计证据链。
++
++它负责：
++
++1. 记录 DID 注册事件。
++2. 记录数据哈希。
++3. 记录授权事件。
++4. 记录训练轮次。
++5. 记录模型参数摘要。
++6. 记录安全聚合结果摘要。
++7. 记录模型版本哈希。
++8. 记录 Agent 调用和报告生成事件。
++9. 按业务 ID 查询完整证据链。
++
++它不负责：
++
++1. 不保存原始电表数据。
++2. 不保存明文模型参数。
++3. 不执行联邦训练。
++4. 不判断业务是否合理。
++
++### 输入
++
++```json
++{
++  "eventType": "global_model_created",
++  "businessId": "fl_task_001",
++  "subjectDid": "did:vpp:operator:001",
++  "payloadHash": "sha256:model123",
++  "payloadUri": "storage://models/global_model_v1.pkl",
++  "description": "global_model_v1 generated by secure FedAvg",
++  "metadata": {
++    "modelVersion": "global_model_v1",
++    "rounds": 3,
++    "participantCount": 3
++  }
++}
++```
++
++### 输出
++
++```json
++{
++  "ledgerTxId": "tx_001",
++  "eventId": "evt_001",
++  "blockHeight": 1024,
++  "currentHash": "sha256:event001"
++}
++```
++
++### 具体操作
++
++1. 接收存证事件。
++2. 校验事件字段完整性。
++3. 生成事件 ID。
++4. 计算当前事件哈希。
++5. 关联上一事件哈希，形成哈希链。
++6. 写入模拟链或联盟链。
++7. 返回交易 ID。
++8. 支持按 `businessId` 查询证据链。
++
++### 封装内容
++
++```text
++record_event()
++record_data_hash()
++record_auth_event()
++record_training_round()
++record_param_digest()
++record_model_version()
++record_agent_call()
++query_trace()
++```
++
++### 对外接口
++
++```http
++POST /api/v1/ledger/events
++GET /api/v1/ledger/events/{eventId}
++GET /api/v1/ledger/traces/{businessId}
++GET /health
++```
++
++建议固定事件类型：
++
++```text
++did_registered
++meter_data_collected
++meter_data_ingested
++data_asset_registered
++auth_requested
++auth_approved
++training_started
++training_finished
++model_update_submitted
++secure_aggregation_finished
++global_model_created
++agent_prediction_called
++agent_report_generated
++audit_trace_queried
++```
++
++## 11. 模块 7：Agent 业务模块
++
++目录：`services/ai-agent`
++
++### 功能与职责
++
++负责将模型结果转化为业务能力，包括预测、交易策略、审计问答和报告生成。
++
++它负责：
++
++1. 调用最新全局模型进行预测。
++2. 生成虚拟电厂交易策略建议。
++3. 基于 `api-gateway` 查询账本后提供的 `evidenceEventIds` 回答审计问题。
++4. 生成交易审计报告。
++5. 输出可展示的业务结论。
++
++它不负责：
++
++1. 不直接访问原始电表数据。
++2. 不训练模型。
++3. 不审批授权。
++4. 不直接调用 `ledger-service` 或写链，由 `api-gateway` 查询证据并编排存证。
++
++### 输入
++
++预测请求：
++
++```json
++{
++  "modelVersion": "global_model_v1",
++  "scenario": "day_ahead_trading",
++  "input": {
++    "date": "2026-07-11",
++    "temperature": 34,
++    "marketPrice": 0.68
++  }
++}
++```
++
++审计问答请求：
++
++```json
++{
++  "businessId": "demo_001",
++  "modelVersion": "global_model_v1",
++  "evidenceEventIds": ["evt_data_001", "evt_model_001"],
++  "question": "本次预测使用了哪个模型版本？"
++}
++```
++
++审计报告请求：
++
++```json
++{
++  "businessId": "demo_001",
++  "modelVersion": "global_model_v1",
++  "evidenceEventIds": ["evt_data_001", "evt_auth_001", "evt_model_001"],
++  "reportType": "transaction_audit"
++}
++```
++
++### 输出
++
++```json
++{
++  "auditReportId": "report_001",
++  "title": "虚拟电厂日前交易审计报告",
++  "summary": "本次交易使用 global_model_v1 完成可调节容量预测，参与主体 3 个，原始数据未出域，关键操作均已存证。",
++  "riskLevel": "low",
++  "recommendations": [
++    "建议申报可调节容量 120MW",
++    "建议保留 10% 安全裕度"
++  ]
++}
++```
++
++### 具体操作
++
++1. 获取最新模型版本或指定模型版本。
++2. 调用模型预测接口或本地模型文件。
++3. 生成可调节容量预测。
++4. 生成交易策略建议。
++5. 使用网关提供的 `evidenceEventIds` 证据链摘要，不直接调用账本服务。
++6. 生成审计报告。
++7. 返回给 `api-gateway`。
++
++### 封装内容
++
++```text
++predict_capacity()
++generate_trading_strategy()
++answer_audit_question()
++generate_audit_report()
++get_model_explanation()
++```
++
++### 对外接口
++
++```http
++POST /api/v1/agent/predict
++POST /api/v1/agent/trading-strategy
++POST /api/v1/agent/audit-question
++POST /api/v1/agent/audit-report
++GET /health
++```
++
++## 12. 模块 8：前端展示模块
++
++目录：`apps/web-dashboard`
++
++### 功能与职责
++
++负责系统可视化展示和演示操作入口。
++
++它负责：
++
++1. 展示系统总览。
++2. 提供“一键演示”按钮。
++3. 展示源端数据可信采集结果。
++4. 展示授权审批状态。
++5. 展示联邦训练任务和模型版本。
++6. 展示链上审计证据链。
++7. 展示 Agent 预测、交易策略和审计报告。
++
++它不负责：
++
++1. 不直接调用除 `api-gateway` 以外的后端模块。
++2. 不实现业务算法。
++3. 不保存核心业务数据。
++
++### 输入
++
++用户点击、筛选条件、业务 ID。
++
++### 输出
++
++页面展示、报告预览、审计链路图。
++
++### 具体操作
++
++1. 调用 `POST /api/v1/demo/run`。
++2. 展示返回的业务 ID 和链路结果。
++3. 调用 `GET /api/v1/demo/status/{businessId}` 查询状态。
++4. 展示报告和审计链路。
++
++### 封装页面
++
++```text
++Dashboard 首页
++Demo 一键演示页
++源端可信采集页
++联邦学习任务页
++隐私计算页
++链上审计页
++Agent 报告页
++```
++
++### 对外接口
++
++前端本身不对外提供业务接口，只调用 `api-gateway`。
++
++## 13. 模块 9：公共包模块
++
++目录：`packages/common`
++
++### 功能与职责
++
++公共包只沉淀所有后端都必须以同一方式实现的最小协议能力，不承载任何模块业务。
++
++它负责：
++
++1. 统一响应 `ApiResponse` 以及稳定的成功/失败构造。
++2. 冻结错误码、唯一稳定 message 和统一异常处理。
++3. 读取、生成和透传 `traceId`。
++4. 生成 UTC 时间。
++5. 冻结 ID：固定 14 个业务 ID 前缀并提供 ID 生成。
++6. 只提供跨服务基础 Schema：`HealthData`、`ErrorDetail`。
++
++模块专属 DTO、哈希、签名、加密及其他业务工具不属于公共包。哈希与签名归源端可信采集或相应业务模块；加密、联邦聚合、账本等能力也必须留在各自模块，禁止为了复用把业务实现移入 `packages/common`。
++
++### 建议封装
++
++```text
++response.py
++errors.py
++schemas.py
++tracing.py
++time_utils.py
++id_generator.py
++fastapi_support.py
++```
++
++## 14. 模块开发顺序
++
++### 阶段一：Mock 链路打通
++
++目标：所有模块先返回固定 JSON，让完整链路跑通。这个阶段不追求算法复杂度，只追求系统可集成、前端可演示、接口可稳定。
++
++开发顺序：
++
++1. `packages/common`：统一响应格式、错误码、ID 命名规则。
++2. `api-gateway`：实现 `POST /api/v1/demo/run` 的 Mock 编排。
++3. `ledger-service`：实现 `POST /api/v1/ledger/events` Mock 存证。
++4. `meter-simulator`：实现 `POST /api/v1/meter/readings/generate` Mock 数据。
++5. `identity-did`：实现主体注册和授权审批 Mock。
++6. `data-ingestion`：实现数据资产登记 Mock。
++7. `federated-learning`：实现训练任务、训练轮次、模型版本和指标的 Mock 返回。
++8. `privacy-compute`：实现参数摘要和安全聚合 Mock。
++9. `ai-agent`：实现审计报告 Mock。
++10. `web-dashboard`：实现一键演示页面。
++11. `infra/docker-compose`：一键启动所有 Mock 服务。
++
++验收标准：
++
++```text
++前端点击“开始演示”后，能看到完整链路结果：数据批次、资产 ID、授权 ID、训练任务、模型版本、模型指标、存证交易、Agent 报告。
++```
++
++### 阶段二：真实轻量联邦学习 MVP
++
++目标：在不引入重型联邦学习平台的前提下，实现真实可运行的 FedAvg。这个阶段是方案可信度的核心。
++
++开发顺序：
++
++1. `datasets/synthetic-vpp`：准备可训练数据，字段至少包含时间、天气、负荷、新能源出力、储能状态、电价和预测目标。
++2. `federated-learning`：实现 2-3 个本地客户端的数据分片加载。
++3. `federated-learning`：实现轻量本地训练模型，优先选择线性回归、轻量 MLP 或可解释回归模型。
++4. `federated-learning`：实现本地模型参数或梯度输出。
++5. `federated-learning`：实现 FedAvg 聚合。
++6. `federated-learning`：实现 `global_model_vN` 模型版本管理。
++7. `federated-learning`：输出 MAE、RMSE、MAPE 指标。
++8. `ledger-service`：记录 `training_started`、`model_update_submitted`、`global_model_created`、`model_evaluated`。
++9. `api-gateway`：将 Mock 训练流程替换为真实训练流程。
++10. `ai-agent`：使用真实 `global_model_vN` 生成预测和交易建议。
++
++验收标准：
++
++```text
++系统可完成 3 个主体、3-5 轮真实 FedAvg 训练，生成 global_model_v1，输出 MAE/RMSE/MAPE，并能由 Agent 调用该模型完成预测。
++```
++
++### 阶段三：源端可信与链上审计真实能力替换
++
++目标：把安全链路从 Mock 升级为可演示的真实能力。
++
++开发顺序：
++
++1. `meter-simulator`：实现真实用电数据生成、AES 加密、签名、SHA-256 哈希。
++2. `identity-did`：实现 DID 注册、公钥绑定和验签支持。
++3. `data-ingestion`：实现签名校验、哈希校验和资产登记。
++4. `ledger-service`：实现哈希链式存证或接入 FISCO BCOS。
++5. `web-dashboard`：展示真实数据哈希、授权记录、训练轮次和模型版本证据链。
++
++验收标准：
++
++```text
++源端数据可加密签名，篡改后验签失败，关键操作可按 businessId 查询完整存证链路。
++```
++
++### 阶段四：隐私计算增强与比赛展示
++
++目标：形成可打分、可演示、可写进报告的创新能力。该阶段增强参数隐私保护，但不阻塞阶段二的真实联邦学习。
++
++开发顺序：
++
++1. `privacy-compute`：实现参数安全掩码聚合。
++2. `privacy-compute`：实现同态加密参数聚合 demo。
++3. `privacy-compute`：实现 MPC 风格安全聚合 demo。
++4. 增加传输劫持对比演示：明文方案 vs 加密方案。
++5. 增加数据篡改检测演示：篡改后验签失败。
++6. 增加联邦模型效果对比：单主体模型 vs 联邦模型。
++7. 增加审计效率指标：按 `businessId` 秒级查询证据链。
++8. 增加 Agent 审计问答和交易策略解释。
++9. 完成部署手册、操作说明、演示视频脚本。
++
++验收标准：
++
++```text
++系统能展示“源端可信、数据不出域、真实联邦训练、参数不可见、模型可追溯、Agent 可解释”的完整闭环。
++```
++
++### 实现策略总结
++
++```text
++Mock 先串通链路，真实 FedAvg 证明核心能力，隐私计算增强展示创新，链上审计贯穿全过程。
++```
++## 15. Issue 拆分建议
++
++第一批 P0 Issue：Mock 链路与接口契约
++
++```text
++[P0][架构] 编写 docs/design/main-flow.md
++[P0][架构] 编写 docs/api/openapi.md
++[P0][公共] 定义统一响应格式和错误码
++[P0][网关] 实现 POST /api/v1/demo/run Mock 编排
++[P0][存证] 实现 POST /api/v1/ledger/events Mock 存证
++[P0][部署] 实现 docker-compose 启动所有 Mock 服务
++[P0][前端] 实现一键演示页面
++```
++
++第二批 P1 Issue：真实轻量联邦学习 MVP
++
++```text
++[P1][数据] 构建可训练的 synthetic-vpp 数据集
++[P1][联邦学习] 实现本地客户端数据分片加载
++[P1][联邦学习] 实现本地训练和模型参数生成
++[P1][联邦学习] 实现 FedAvg 聚合
++[P1][联邦学习] 实现 global_model_vN 模型版本管理
++[P1][联邦学习] 输出 MAE、RMSE、MAPE 指标
++[P1][存证] 增加训练轮次、参数提交、模型版本、模型评估事件
++[P1][Agent] 使用真实 global_model_vN 完成预测和交易建议
++```
++
++第三批 P2 Issue：源端可信与审计真实能力
++
++```text
++[P2][源端采集] 实现电表数据生成、AES 加密、签名、哈希
++[P2][DID] 实现主体 DID 注册与设备 DID 注册
++[P2][数据接入] 实现密文数据接收、签名校验和哈希校验
++[P2][存证] 实现按 businessId 查询审计链路
++[P2][前端] 展示训练轮次、参数摘要、模型版本和审计链路
++```
++
++第四批 P3 Issue：隐私计算增强与比赛展示
++
++```text
++[P3][隐私计算] 实现参数安全掩码聚合
++[P3][隐私计算] 实现同态加密参数保护 demo
++[P3][隐私计算] 实现 MPC 风格安全聚合 demo
++[P3][安全演示] 实现数据截获和篡改对比演示
++[P3][模型评估] 实现单主体模型 vs 联邦模型对比
++[P3][Agent] 实现审计问答和交易策略解释
++[P3][文档] 完成部署手册、操作说明和演示视频脚本
++```
++## 16. 给 Agent 的开发提示词模板
++
++每个成员使用 Agent 写代码时，必须使用类似提示词：
++
++```text
++你正在开发 vpp-trusted-data-space 项目的 [模块名] 服务。
++
++请严格遵守：
++1. 不要修改其他模块代码。
++2. 只在 services/[模块名] 下开发。
++3. 必须提供 GET /health。
++4. 必须实现 Issue 中指定的接口。
++5. 请求和响应必须符合 docs/api/openapi.md。
++6. 统一响应、错误码、追踪和幂等必须遵循 `docs/api/response-and-errors.md`。
++7. 必须提供 README.md，说明如何启动和测试。
++8. 必须提供最小测试或 curl 调用示例。
++9. 不要改变接口字段名，除非先修改 docs/api/openapi.md 并通知技术负责人。
++
++当前任务：
++[粘贴 Issue 内容]
++```
++
++## 17. 最终协作规则
++
++1. 模块负责人只改自己模块目录。
++2. 接口修改必须先改文档，再改代码。
++3. 所有 PR 必须说明调用方、接口、输入、输出和验收方式。
++4. `api-gateway` 合并前必须能调用该模块接口。
++5. `docker-compose` 启动失败的 PR 不允许合并到 `develop`。
++6. 第一周目标不是算法最强，而是链路最先跑通。
++
++7. 所有接口路径和字段必须与 [`docs/api/openapi.md`](../api/openapi.md) 一致。
++8. 所有错误码必须与 [`docs/api/response-and-errors.md`](../api/response-and-errors.md) 一致，不得在模块内自定义同义错误码。
++
++一句话总结：
++
++```text
++模块负责能力，api-gateway 负责编排，ledger-service 负责存证，web-dashboard 负责展示。
++```
+diff --git a/docs/design/week-one-mock-delivery.md b/docs/design/week-one-mock-delivery.md
+new file mode 100644
+index 0000000..efff77b
+--- /dev/null
++++ b/docs/design/week-one-mock-delivery.md
+@@ -0,0 +1,667 @@
++# 第一周全链路 Mock 交付设计
++
++> **文档职责**：本文档定义第一周的团队分工、技术基线、跨模块依赖、七天执行节奏、验收门槛、风险控制和最终演示标准。模块长期职责以 `docs/design/module-contracts.md` 为准，HTTP 接口字段以 `docs/api/openapi.md` 为准，统一响应和错误码以 `docs/api/response-and-errors.md` 为准。
++
++## 1. 背景与目标
++
++团队共 10 人：
++
++- 1 人负责技术统筹、接口契约、公共包和最终验收。
++- 8 人分别负责 8 个后端服务。
++- 1 人负责前端展示。
++
++团队可连续 7 天投入大部分开发时间。仓库当前已经具备模块目录、接口契约、Issue/PR 模板和基础 CI，但各服务、前端、部署和测试仍以目录骨架为主。
++
++第一周唯一最高优先级目标是：
++
++```text
++在一台全新环境中执行 Docker Compose 一键启动，
++用户通过前端点击一次“开始演示”，
++系统通过真实 HTTP 调用完成全链路 Mock，
++并展示数据批次、资产、授权、训练、隐私聚合、模型、存证和 Agent 结果。
++```
++
++### 1.1 第一周交付原则
++
++```text
++业务能力允许 Mock，工程链路必须真实。
++```
++
++允许 Mock 的内容：
++
++- 内存存储。
++- 可重复的模拟电表数据。
++- 模拟密文、签名和哈希。
++- 模拟 DID 和授权审批。
++- 模拟本地训练、模型更新、FedAvg 指标和模型版本。
++- 模拟安全掩码、同态加密和 MPC 聚合结果。
++- 内存哈希链代替真实区块链。
++- 稳定模板代替真实 Agent 模型推理。
++
++必须真实完成的内容：
++
++- FastAPI HTTP 服务。
++- 请求和响应 Schema 校验。
++- 服务间 HTTP 调用。
++- 动态业务 ID 和状态流转。
++- 统一错误响应、追踪 ID 和基本幂等。
++- Docker 镜像和 Compose 编排。
++- 前端真实调用网关。
++- 单元测试、接口测试和端到端测试。
++- 异常路径和可定位错误信息。
++
++### 1.2 非目标
++
++第一周不实现：
++
++- 生产数据库。
++- FISCO BCOS 或其他真实区块链网络。
++- 真实 AES 密钥体系和生产级数字签名。
++- 真实跨节点联邦学习。
++- 生产级同态加密和 MPC。
++- 真实大模型或外部 Agent 平台调用。
++- MQTT 接入。
++- 复杂多页面前端、权限系统和微前端。
++
++上述能力在后续阶段替换对应 Mock 实现，不改变第一周冻结的模块边界和 HTTP 契约。
++
++## 2. 技术基线
++
++### 2.1 后端
++
++8 个后端服务统一使用：
++
++```text
++语言：Python 3.11
++Web 框架：FastAPI
++数据模型：Pydantic v2
++服务启动：Uvicorn
++服务通信：HTTP/1.1 + JSON
++HTTP 客户端：httpx
++测试：pytest + FastAPI TestClient/httpx
++```
++
++依赖要求：
++
++- 每个模块锁定自己的直接依赖版本。
++- FastAPI 必须使用兼容 Pydantic v2 的版本。
++- 不允许成员自行替换为 Flask、Django、Spring Boot 或其他框架。
++- 模块间不得通过导入对方源码完成业务调用。
++
++### 2.2 前端
++
++前端统一使用：
++
++```text
++运行时：Node.js 24 LTS
++框架：Vue 3
++构建工具：Vite
++语言：JavaScript
++组件库：Element Plus
++HTTP 客户端：Axios
++```
++
++第一周不使用 TypeScript、Pinia、Nuxt 和复杂自定义组件体系。前端只实现一页演示控制台。
++
++### 2.3 编码与文件格式
++
++- 所有源码、Markdown、YAML、JSON 和环境变量示例使用 UTF-8。
++- Windows PowerShell 5 读取 UTF-8 无 BOM 文档时必须显式使用 `Get-Content -Encoding UTF8`。
++- 禁止提交真实 `.env`、密钥、令牌、密码、生产数据和模型参数。
++- 提交 `.env.example`，仅包含非敏感示例值。
++
++## 3. 第一周统一编排边界
++
++第一周由 `api-gateway` 统一编排跨模块业务流程。除健康检查外，前端只调用网关；业务服务不直接写账本。
++
++```text
++web-dashboard
++  -> api-gateway
++      -> meter-simulator
++      -> identity-did
++      -> data-ingestion
++      -> federated-learning
++      -> privacy-compute
++      -> ledger-service
++      -> ai-agent
++```
++
++第一周主流程顺序：
++
++1. 前端调用 `POST /api/v1/demo/run`。
++2. 网关调用 `meter-simulator` 生成动态读数批次。
++3. 网关调用 `ledger-service` 记录采集事件。
++4. 网关调用 `identity-did` 验证主体与设备身份。
++5. 网关调用 `data-ingestion` 接收批次并登记资产。
++6. 网关调用 `ledger-service` 记录资产事件。
++7. 网关创建并审批授权申请。
++8. 网关调用 `ledger-service` 记录授权事件。
++9. 网关创建并启动联邦训练任务，取得第 1 轮 `currentRound` 与 `updates`。
++10. 每轮由网关先调用 `privacy-compute` 完成安全聚合，再将聚合结果交给 `federated-learning` 执行 FedAvg。
++11. 非最终轮按 FL 返回的 `nextRound` 与下一轮完整 `updates` 继续步骤 10；最终轮取得模型版本、哈希和指标。
++12. 网关记录每轮训练、聚合和最终模型事件。
++13. 网关调用 `ai-agent` 完成预测、交易策略和审计报告。
++14. 网关记录 Agent 调用事件并返回完整汇总结果。
++
++### 3.1 已冻结决策与完成状态
++
++以下联调决策已经冻结并同步到正式契约，完成状态为“已完成”；实现者不得再自行发明替代字段或调用方向：
++
++1. 第一周统一由网关编排；联邦学习服务不直接调用隐私计算或账本，其他业务服务也不直接写账本。
++2. `POST /api/v1/fl/tasks/{taskId}/start` 返回第 1 轮 `currentRound` 和完整 `updates`，更新项包含 `participantDid`、`sampleCount`、`modelUpdateUri`、`updateHash`。
++3. 每轮网关先调用 privacy secure-aggregate，再调用 FL aggregate。非最终轮返回 `status: running`、整数 `nextRound` 和下一轮完整 `updates`；最终轮返回 `status: completed`、`nextRound: null`、`updates: []` 及最终模型版本、哈希、指标。
++4. 更新提交与 FL aggregate 的 `taskId`、`roundId` 只来自路径；请求体不重复路径 ID。
++5. `POST /api/v1/data/ingest` 返回 `assetId`；`POST /api/v1/data/assets` 是独立资产元信息登记接口，不参与主流程。
++6. `POST /api/v1/demo/run` 的业务 `data` 统一包含 `businessId`、模型指标、Agent 结果标识和存证交易 ID；`traceId` 只存在于公共响应包络，并与响应头 `X-Trace-Id` 一致。
++
++上述完成状态由契约测试持续校验；任何后续变更仍须遵循第 10.2 节流程。
++
++## 4. 人员分工
++
++采用“模块主责 + 横向副职责”。模块负责人对自己的目录、接口、测试、Dockerfile 和 README 负责，同时承担一个横向工程职责。
++
++| 角色 | 第一主责 | 横向副职责 |
++|---|---|---|
++| 技术负责人 | 技术统筹、接口契约、`packages/common`、PR 决策、最终验收 | 每日集成、风险清单、版本冻结 |
++| api-gateway 负责人 | 网关、下游客户端和主流程状态 | 集成测试负责人 |
++| meter-simulator 负责人 | 采集 Mock 服务 | 标准 Mock 数据与测试夹具 |
++| data-ingestion 负责人 | 数据接入 Mock 服务 | 接口契约一致性检查 |
++| identity-did 负责人 | DID 与授权 Mock 服务 | 身份、授权和失败场景检查 |
++| federated-learning 负责人 | 训练任务、轮次、指标和模型版本 Mock | 后端工程规范复核 |
++| privacy-compute 负责人 | 参数保护与聚合 Mock | Docker Compose 和环境变量 |
++| ledger-service 负责人 | 存证、事件和证据链 Mock | 审计事件完整性检查 |
++| ai-agent 负责人 | 预测、策略、问答和报告 Mock | 演示数据与演示脚本 |
++| web-dashboard 负责人 | Vue 一键演示页面 | 前端验收截图和操作说明 |
++
++## 5. 技术负责人的职责
++
++技术负责人第一周不再承包完整业务模块，主要交付如下。
++
++### 5.1 Day 1 直接交付
++
++负责 `packages/common` 第一版：
++
++```text
++packages/common/
++  response.py
++  errors.py
++  schemas.py
++  id_generator.py
++  time_utils.py
++  tracing.py
++  tests/
++  pyproject.toml
++  README.md
++```
++
++公共包只包含跨模块基础能力：
++
++- `ApiResponse`、成功响应和失败响应构造。
++- 稳定公共错误码。
++- `traceId` 读取与生成。
++- ISO 8601 时间生成。
++- 统一业务 ID 前缀和生成逻辑。
++- 跨模块基础 Schema。
++
++公共包禁止包含：
++
++- 模块专属 DTO。
++- 数据库模型。
++- 网关工作流。
++- 加密、联邦学习、隐私计算或账本业务逻辑。
++- 任何服务的环境配置。
++
++公共包第一版必须在 Day 1 中午前冻结。之后只接受解决阻塞问题的兼容性修改。
++
++### 5.2 持续职责
++
++- 审核接口路径、字段、状态和错误码变更。
++- 保证 `openapi.md`、`module-contracts.md`、`main-flow.md` 和公共错误码一致。
++- 分配 Issue，检查负责人、依赖、截止时间和验收命令。
++- 每天至少执行一次全量合并和 Compose 主流程检查。
++- 维护 Blocked 清单并在当天处理跨模块阻塞。
++- 控制范围，禁止第一周提前实现真实算法挤占联调时间。
++- 主持 Day 7 全新环境验收并冻结 `week1-mock-v0.1.0`。
++
++## 6. 各模块任务与验收
++
++### 6.1 api-gateway
++
++必须实现：
++
++- `POST /api/v1/demo/run`
++- `GET /api/v1/demo/status/{businessId}`
++- `GET /health`
++- 7 个业务服务的异步 HTTP 客户端。
++- 主流程状态机。
++- `X-Trace-Id` 生成和下游透传。
++- 下游超时、不可用和非法响应转换。
++- `Idempotency-Key` 重试结果复用。
++
++验收：
++
++- 网关不得自己伪造全部下游结果。
++- 停止任意一个关键下游后，返回对应 `5xxxx` 错误和 `traceId`。
++- 相同幂等键、相同请求体返回相同 `businessId`。
++- 相同幂等键、不同请求体返回 `40901`。
++- 状态查询不重复执行主流程。
++
++### 6.2 meter-simulator
++
++必须实现：
++
++- `POST /api/v1/meter/readings/generate`
++- `GET /health`
++- 动态 `readingBatchId` 和 `readingId`。
++- 固定随机种子下可复现的模拟读数。
++- 格式稳定的 Mock `ciphertext`、`signature` 和 `hash`。
++
++验收：
++
++- 返回读数数量与 `count` 一致。
++- 每条读数包含完整契约字段。
++- 非法 `count`、无效 DID 等请求返回公共错误码。
++- 相同幂等键不会生成第二个批次。
++
++### 6.3 data-ingestion
++
++必须实现：
++
++- `POST /api/v1/data/ingest`
++- `POST /api/v1/data/assets`
++- `GET /api/v1/data/assets/{assetId}`
++- `GET /health`
++- 内存资产仓库。
++- Mock 验签和验哈希逻辑。
++
++验收：
++
++- 接收合法批次后可使用 `assetId` 查询。
++- 篡改 `hash` 返回 `40104`。
++- 篡改 `signature` 返回 `40103`。
++- 响应和日志不出现原始明文数据。
++
++### 6.4 identity-did
++
++必须实现：
++
++- `POST /api/v1/identity/subjects`
++- `POST /api/v1/identity/devices`
++- `POST /api/v1/identity/verify`
++- `POST /api/v1/auth/requests`
++- `POST /api/v1/auth/requests/{authId}/approve`
++- `GET /api/v1/auth/requests/{authId}`
++- `GET /health`
++- 内存主体、设备和授权仓库。
++
++验收：
++
++- 主体和设备创建后可以验证。
++- 授权按 `requested -> approved` 流转。
++- 未知 DID 返回 `40102`。
++- 已过期授权返回 `40303`。
++- 非法状态重复审批返回 `40902`。
++
++### 6.5 federated-learning
++
++必须实现：
++
++- `POST /api/v1/fl/tasks`
++- `POST /api/v1/fl/tasks/{taskId}/start`
++- `POST /api/v1/fl/tasks/{taskId}/rounds/{roundId}/updates`
++- `POST /api/v1/fl/tasks/{taskId}/rounds/{roundId}/aggregate`
++- `GET /api/v1/fl/tasks/{taskId}`
++- `GET /api/v1/fl/tasks/{taskId}/metrics`
++- `GET /api/v1/fl/models/{modelVersion}`
++- `GET /health`
++- 3 个参与方、3 轮训练的内存状态机。
++- 动态模型版本和稳定 Mock 指标。
++
++验收：
++
++- 任务状态按 `created -> running -> completed` 流转。
++- 启动结果提供当前轮次模型更新摘要。
++- 更新数量不足返回 `42202`。
++- 未完成安全聚合时不能生成模型。
++- 完成后可查询 `global_model_v1` 和 MAE/RMSE/MAPE。
++
++### 6.6 privacy-compute
++
++必须实现：
++
++- `POST /api/v1/privacy/model-updates/encrypt`
++- `POST /api/v1/privacy/model-updates/mask`
++- `POST /api/v1/privacy/secure-aggregate`
++- `GET /api/v1/privacy/aggregates/{aggregateId}`
++- `GET /health`
++- 内存聚合结果仓库。
++
++验收：
++
++- 支持 `homomorphic_demo`、`secure_masking` 和 `mpc_demo` 的稳定 Mock 输出。
++- 聚合结果可按 `aggregateId` 查询。
++- 参与方数量与输入更新一致。
++- 不支持的模式返回 `42203`。
++- 更新数量不足返回 `42202`。
++- 响应不返回单个参与方的明文更新。
++
++### 6.7 ledger-service
++
++必须实现：
++
++- `POST /api/v1/ledger/events`
++- `GET /api/v1/ledger/events/{eventId}`
++- `GET /api/v1/ledger/traces/{businessId}`
++- `GET /health`
++- 内存事件仓库和简化哈希链。
++
++验收：
++
++- 新事件关联 `previousHash` 并生成 `currentHash`。
++- 可按 `businessId` 返回时间有序的完整证据链。
++- 相同事件幂等重试不产生重复记录。
++- 冲突重复事件返回 `40903`。
++- 账本数据只包含事件、摘要、URI 和审计元数据。
++
++### 6.8 ai-agent
++
++必须实现：
++
++- `POST /api/v1/agent/predict`
++- `POST /api/v1/agent/trading-strategy`
++- `POST /api/v1/agent/audit-question`
++- `POST /api/v1/agent/audit-report`
++- `GET /health`
++- 可重复、可展示的模板化业务结果。
++
++验收：
++
++- 指定模型版本后生成动态 `predictionId`。
++- 交易策略引用预测结果并提供安全裕度和解释。
++- 审计问答返回证据事件 ID。
++- 审计报告包含模型版本、参与主体、风险级别和建议。
++- 不存在的模型版本返回 `40404`。
++
++### 6.9 web-dashboard
++
++必须实现一个单页演示控制台：
++
++- 系统名称和服务状态区。
++- 场景参数和“一键开始演示”按钮。
++- 采集、接入、授权、训练、聚合、模型、Agent 步骤状态。
++- 批次、资产、授权、训练任务、模型版本和指标展示。
++- 存证交易和审计报告展示。
++- 失败阶段、错误码、`message` 和 `traceId` 展示。
++- 使用 `businessId` 重新查询状态。
++
++验收：
++
++- 只调用 `api-gateway`。
++- 请求中有加载状态，执行期间禁止重复点击。
++- 后端失败时不显示“成功完成”。
++- API 基础地址通过环境变量配置。
++- `npm run build` 成功。
++- Compose 环境中可访问网关。
++
++## 7. 横向工程任务
++
++### 7.1 Docker Compose
++
++由 privacy-compute 负责人主责，技术负责人和网关负责人复核。
++
++必须交付：
++
++- 根级或 `infra/docker-compose` 下的 Compose 文件。
++- 8 个后端、前端共 9 个服务。
++- 服务环境变量。
++- 健康检查。
++- 启动依赖。
++- 独立 Dockerfile。
++- `.env.example`。
++
++端口冻结如下：
++
++| 服务 | 容器端口 | 本机端口 |
++|---|---:|---:|
++| web-dashboard | `80` | `3000` |
++| api-gateway | `8000` | `8000` |
++| meter-simulator | `8000` | `8001` |
++| data-ingestion | `8000` | `8002` |
++| identity-did | `8000` | `8003` |
++| federated-learning | `8000` | `8004` |
++| privacy-compute | `8000` | `8005` |
++| ledger-service | `8000` | `8006` |
++| ai-agent | `8000` | `8007` |
++
++容器间使用服务名访问，例如：
++
++```text
++http://ledger-service:8000
++```
++
++### 7.2 集成与端到端测试
++
++由 api-gateway 负责人主责，ai-agent 和 web-dashboard 负责人协助。
++
++必须覆盖：
++
++- 8 个服务健康检查。
++- 主流程正常路径。
++- 状态查询。
++- 相同幂等键重试。
++- 无效 DID 或篡改数据失败。
++- 下游服务不可用。
++- 账本证据链完整性。
++- 前端一键演示。
++
++### 7.3 CI
++
++当前 CI 只检查目录存在，第一周必须增加：
++
++- Python 依赖安装和公共包测试。
++- 8 个后端模块测试。
++- 前端依赖安装和生产构建。
++- Compose 配置校验。
++- 接口路径覆盖校验。
++- 禁止提交真实 `.env` 和常见密钥文件。
++
++CI 不要求在 GitHub Actions 中运行完整 Compose E2E；完整 E2E 可以作为本地或验收环境命令，但必须可复现。
++
++## 8. 七天执行节奏
++
++| 日期 | 合并门槛 |
++|---|---|
++| Day 1 | 契约歧义清零；公共包第一版合并；8 个服务可启动且 `/health` 通过；前端工程可启动；Compose 初版存在 |
++| Day 2 | 各模块全部契约接口完成正常路径；前端完成静态页面和示例 JSON 展示 |
++| Day 3 | 各模块完成失败路径、动态 ID、状态、幂等和模块测试；网关下游客户端完成 |
++| Day 4 | 网关通过真实 HTTP 串通全部后端；Compose 能启动 9 个服务 |
++| Day 5 | 前端接入真实网关；一键演示首次完整跑通 |
++| Day 6 | 完成异常场景、CI、E2E、README、UTF-8 和环境兼容问题 |
++| Day 7 | 全新环境最终验收、演示彩排、问题清零并冻结版本 |
++
++控制规则：
++
++- 首次全链路联调不得晚于 Day 4。
++- 首次前端完整演示不得晚于 Day 5。
++- Day 5 未跑通时，立即停止页面装饰、额外算法和非关键接口优化。
++- Day 6 后原则上不再接受接口破坏性变更。
++
++## 9. 完成定义
++
++### 9.1 单模块 Definition of Done
++
++后端模块必须同时满足：
++
++1. 可独立启动。
++2. `GET /health` 返回统一成功响应。
++3. `openapi.md` 中该模块全部接口已实现。
++4. 正常路径字段和类型符合契约。
++5. 至少两个模块级失败场景通过。
++6. 写接口至少有一个幂等测试。
++7. 响应包含并透传 `traceId`。
++8. 创建后可查询，不使用全局固定业务 ID。
++9. 测试命令通过。
++10. Docker 镜像可构建和启动。
++11. README 包含启动、测试和 curl 示例。
++12. PR 包含验证证据。
++
++最低测试要求：
++
++```text
++1 个健康检查测试
++每个接口至少 1 个正常路径测试
++整个模块至少 2 个失败路径测试
++至少 1 个幂等测试
++```
++
++### 9.2 全链路 Definition of Done
++
++在全新环境执行：
++
++```bash
++docker compose up --build
++```
++
++必须通过：
++
++1. 前端和 8 个后端容器全部运行并通过健康检查。
++2. 前端点击一次“开始演示”。
++3. 网关真实调用各业务服务。
++4. 返回的业务 ID 非空且相互关联。
++5. 页面展示模型指标、存证交易和 Agent 报告。
++6. 证据链包含采集、资产、授权、训练、聚合、模型和 Agent 事件。
++7. `businessId` 状态查询成功。
++8. 相同幂等键不会创建第二套业务数据。
++9. 人为停止一个关键下游后，前端显示正确错误码和 `traceId`。
++10. CI 和所有约定测试通过。
++
++## 10. 协作与管理机制
++
++### 10.1 每日节奏
++
++- 上午 15 分钟：每人只汇报昨日可验证结果、今日交付和阻塞。
++- 晚上 20 至 30 分钟：合并到 `develop`，执行健康检查、Compose 和主流程检查。
++- 阻塞超过 2 小时必须进入 `Blocked` 并通知技术负责人。
++
++看板状态：
++
++```text
++Backlog -> Ready -> In Progress -> In Review -> Integration -> Done
++                                              \-> Blocked
++```
++
++`Done` 表示已经合并并通过验收；“代码写完但未联调”只能进入 `Integration`。
++
++### 10.2 接口变更流程
++
++```text
++提出变更理由和调用方影响
++-> 技术负责人审核
++-> 先更新 openapi.md
++-> 同步 module-contracts.md
++-> 影响流程时更新 main-flow.md
++-> 影响公共协议时更新 response-and-errors.md
++-> 修改代码
++-> 受影响模块重新联调
++```
++
++未经技术负责人批准，成员不得自行新增同义字段、错误码或状态。
++
++### 10.3 PR 规则
++
++- 一个 PR 聚焦一个模块或一个横向任务。
++- PR 必须关联 Issue。
++- PR 必须提供实际测试命令和结果。
++- 接口变更必须明确文档同步情况。
++- 涉及网关调用的模块必须说明联调状态。
++- Day 4 前优先合并可联调的小 PR，不等待模块全部完成后提交大 PR。
++
++## 11. 第一周遗漏项与处理
++
++以下事项此前没有独立负责人或完整定义，纳入本周：
++
++| 遗漏项 | 处理方式 | 负责人 |
++|---|---|---|
++| 公共包 | Day 1 冻结最小公共 API | 技术负责人 |
++| 技术版本约束 | Python 3.11、Node.js 24 LTS；依赖锁定 | 技术负责人 |
++| 服务端口和发现名称 | 使用本文端口表和 Compose 服务名 | privacy-compute |
++| Dockerfile 模板 | 统一 Python 服务模板 | federated-learning + privacy-compute |
++| Compose 和健康检查 | Day 1 建立、持续补齐 | privacy-compute |
++| `.env.example` | 提供非敏感配置样例 | privacy-compute |
++| CORS | 只允许前端经网关访问业务能力 | api-gateway |
++| CI 过弱 | 增加测试、构建和契约校验 | api-gateway |
++| 集成测试无人主责 | 纳入网关副职责 | api-gateway |
++| E2E 无人主责 | 网关主责，前端和 Agent 协助 | api-gateway |
++| 日志和追踪 | 结构化日志并贯穿 `traceId` | 技术负责人 + 全体后端 |
++| HTTP 超时 | 网关下游默认 5 秒 | api-gateway |
++| Readiness 与 healthiness | `/health` 表示可接收请求 | 全体后端 |
++| UTF-8 显示兼容 | 文档和命令明确编码 | 技术负责人 |
++| ID 前缀 | 由公共包统一生成 | 技术负责人 |
++| Mock 可重复性 | 使用固定随机种子 | meter-simulator |
++| 契约歧义 | Day 1 完成文档同步 | 技术负责人 |
++| 版本标签 | Day 7 冻结 `week1-mock-v0.1.0` | 技术负责人 |
++
++统一 ID 前缀：
++
++```text
++demo_
++batch_
++reading_
++asset_
++auth_
++fl_task_
++aggregate_
++global_model_v
++prediction_
++strategy_
++report_
++evt_
++tx_
++trace_
++```
++
++## 12. 风险与降级策略
++
++| 风险 | 预警信号 | 处理 |
++|---|---|---|
++| 接口字段各自变化 | 同一字段出现多个命名 | 暂停合并，由技术负责人冻结契约 |
++| 网关成为瓶颈 | Day 3 下游客户端未完成 | 集成测试副职责人员协助客户端和夹具 |
++| Compose 最后才开始 | Day 2 仍没有可解析配置 | 暂停 privacy 非关键功能，优先部署 |
++| 前端经验不足 | Day 3 仍未完成静态页面 | 只保留单页和 Element Plus 标准组件 |
++| 过早实现真实算法 | 出现数据库、链 SDK 或复杂训练框架 | 移出第一周 Issue |
++| 模块只返回固定 JSON | 所有请求返回同一个 ID | 拒绝验收，要求内存状态和动态 ID |
++| Windows 编码问题 | 中文文档或日志乱码 | 统一 UTF-8 并在 PowerShell 显式指定编码 |
++| 大 PR 难以合并 | Day 4 才首次提交模块 | 拆分健康检查、正常路径、失败路径和部署 PR |
++
++若 Day 5 尚未跑通，按以下顺序砍范围：
++
++1. 取消非主页面和复杂图表。
++2. 保留每个模块全部接口，但减少非主链路页面展示。
++3. 取消额外动画和视觉装饰。
++4. 保留一种隐私聚合模式进入主流程，其他模式仍完成独立接口测试。
++5. 不削减统一响应、错误处理、健康检查、Compose 和主链路存证。
++
++## 13. 第一周验收输出
++
++Day 7 最终应形成：
++
++- 可一键启动的 Compose 环境。
++- 可操作的前端全链路演示。
++- 8 个符合契约的 FastAPI 服务。
++- 可复用的 Python 公共包。
++- 完整 Mock 证据链。
++- 模块测试、集成测试和前端构建结果。
++- 每个模块的 README。
++- 演示操作说明和失败恢复说明。
++- 第一周完成清单、遗留问题和第二周真实能力替换顺序。
++
++第二周优先替换顺序：
++
++```text
++模拟数据集和真实轻量 FedAvg
++-> 真实源端哈希、签名与验签
++-> 持久化存储
++-> 哈希链或联盟链
++-> 参数安全聚合增强
++-> Agent 真实模型调用
++```
+diff --git a/docs/superpowers/specs/2026-07-16-sanitized-week1-issue-delivery-design.md b/docs/superpowers/specs/2026-07-16-sanitized-week1-issue-delivery-design.md
+new file mode 100644
+index 0000000..244435b
+--- /dev/null
++++ b/docs/superpowers/specs/2026-07-16-sanitized-week1-issue-delivery-design.md
+@@ -0,0 +1,139 @@
++# 第一周脱敏 Issue 与本地任务书交付设计
++
++## 1. 目标
++
++为第一周 10 个负责人任务包建立两层交付：
++
++1. 在公开仓库 `Guy-GD/vpp-trusted-data-space` 创建 10 条脱敏 GitHub Issues，用于团队进度跟踪。
++2. 在本地各模块目录生成 `WEEK1-TASK.md`，保存完整架构、接口、实施步骤和验收标准，供技术负责人线下私发或自行决定是否推送。
++
++本设计只处理任务分发与进度跟踪，不改变已经冻结的系统架构、接口契约或第一周 Mock 范围。
++
++## 2. 信息边界
++
++### 2.1 GitHub Issue 可以公开的内容
++
++每条 Issue 仅包含：
++
++- 模块名称与任务标题；
++- 负责人角色，不包含个人姓名、邮箱或账号；
++- 目标完成日；
++- 通用交付物类型；
++- Day 1～Day 7 团队门禁；
++- 通用关闭条件；
++- “详细任务书由技术负责人线下发放”的说明；
++- 不含敏感信息的模块目录名称。
++
++### 2.2 GitHub Issue 禁止公开的内容
++
++Issue 不包含：
++
++- 具体 API 路径、请求参数、响应结构和错误码；
++- 系统架构关系、内部调用顺序和状态机；
++- 文件级实现步骤、算法或安全机制细节；
++- 完整验收用例、测试数据和 Mock 数据结构；
++- 密钥、凭据、成员身份或其他访问控制信息；
++- 本地详细任务书的可点击链接。
++
++### 2.3 本地详细任务书
++
++`WEEK1-TASK.md` 可以包含已审核任务包中的完整内容：
++
++- 模块职责与边界；
++- 依赖关系；
++- 文件范围；
++- 完整接口清单；
++- Day 1～Day 7 实施步骤；
++- 正常、失败、幂等和集成验收标准；
++- 与公共契约、网关、Compose 和前端的联调要求。
++
++这些文件只生成在本地工作区。本次工作不执行 `git add`、commit、push 或其他外部发布操作。
++
++## 3. 任务书映射
++
++| Task | 负责人角色 | 本地详细任务书 |
++|---|---|---|
++| 1 | 技术负责人 | `packages/common/WEEK1-TASK.md` |
++| 2 | meter-simulator 负责人 | `services/meter-simulator/WEEK1-TASK.md` |
++| 3 | data-ingestion 负责人 | `services/data-ingestion/WEEK1-TASK.md` |
++| 4 | identity-did 负责人 | `services/identity-did/WEEK1-TASK.md` |
++| 5 | federated-learning 负责人 | `services/federated-learning/WEEK1-TASK.md` |
++| 6 | privacy-compute / Compose 负责人 | `services/privacy-compute/WEEK1-TASK.md` |
++| 7 | ledger-service 负责人 | `services/ledger-service/WEEK1-TASK.md` |
++| 8 | ai-agent 负责人 | `services/ai-agent/WEEK1-TASK.md` |
++| 9 | api-gateway / 集成测试负责人 | `services/api-gateway/WEEK1-TASK.md` |
++| 10 | web-dashboard 负责人 | `apps/web-dashboard/WEEK1-TASK.md` |
++
++Task 6 的 Compose 细节保存在 privacy-compute 任务书中，并明确其工作目录还包括 `infra/docker-compose/`。Task 9 的 CI 与 E2E 细节保存在 api-gateway 任务书中，并明确其工作目录还包括 `.github/workflows/`、`tests/integration/` 和 `tests/e2e/`。
++
++## 4. 脱敏 Issue 结构
++
++每条公开 Issue 使用相同结构：
++
++```markdown
++## 任务目标
++
++一句话描述该模块第一周要完成的 Mock 能力，不暴露接口或架构细节。
++
++## 负责人和时间
++
++- 负责人角色
++- 目标完成日
++- 模块目录
++- 详细任务书由技术负责人线下发放
++
++## 第一周通用推进门禁
++
++- Day 1：工程可启动、健康检查与基础契约准备完成
++- Day 2：正常路径完成
++- Day 3：失败路径、状态、动态 ID、幂等和模块测试完成
++- Day 4：后端 HTTP 链路与 Compose 联调
++- Day 5：前端首次完整演示
++- Day 6：CI、E2E、异常演练和运行文档
++- Day 7：全新环境验收、彩排和版本冻结
++
++## 本模块公开交付物
++
++只描述服务、测试、容器、页面或文档等交付物类型。
++
++## 关闭条件
++
++只使用不泄露实现细节的通用验收条件。
++```
++
++Issue 不分配 assignee，因为目前没有提供 9 位成员对应的 GitHub 用户名；创建后由技术负责人手动分配。
++
++## 5. 创建与重复处理
++
++公开 Issue 标题沿用已审核的 10 个中文标题。
++
++- 若不存在同标题 Issue，则创建新 Issue。
++- 若存在带 `codex-week1-sanitized-task:N` 隐藏标记的同标题 Issue，则更新复用。
++- 若存在没有该标记的同标题 Issue，则停止，不覆盖他人内容。
++- 不新建标签、里程碑、Project 或成员权限。
++
++Issue 按依赖顺序创建：公共任务优先，随后 7 个业务模块，再创建网关/测试任务，最后创建前端任务。公开正文不写具体依赖图，仅写“跨模块阻塞及时通知技术负责人”。
++
++## 6. 安全措施
++
++- 本地 `WEEK1-TASK.md` 在生成后加入 `.git/info/exclude`，避免普通 `git add .` 意外暂存。
++- 不修改仓库共享 `.gitignore`，避免产生需要推送的额外仓库变更。
++- 发布前对 10 条 Issue 正文执行敏感词扫描，至少检查 API 路径、HTTP 方法、请求/响应字段、错误码、架构节点、内部文档路径和代码文件路径。
++- 本地任务书生成后检查数量为 10、目标路径正确、无空任务包、无 `TODO`/`TBD`。
++- GitHub 发布后重新读取全部 10 条 Issue，核验标题、脱敏标记、Day 1～Day 7、目标日和关闭条件。
++
++## 7. 验收标准
++
++设计实施完成时必须满足：
++
++1. 10 个目标模块目录各有一份完整 `WEEK1-TASK.md`。
++2. 任务书内容来自已审核的 10 个负责人任务包，没有丢失接口、步骤或验收标准。
++3. 10 份任务书均未被 Git 跟踪或暂存，并受本地 exclude 保护。
++4. GitHub 上恰有 10 条本次创建或更新的脱敏 Issue。
++5. 每条 Issue 都包含负责人角色、目标日、Day 1～Day 7 门禁、公开交付物和关闭条件。
++6. 每条 Issue 都不包含具体接口、架构、数据结构、错误码、实施文件清单或本地任务书链接。
++7. 不修改成员权限，不创建标签、里程碑或 Project，不推送本地详细任务书。
++
++## 8. 后续使用
++
++技术负责人可以直接把对应的 `WEEK1-TASK.md` 私发给负责人。若后续仓库改为私有并决定提交这些文件，应先重新评估访问成员和保密范围，再显式移除 `.git/info/exclude` 中对应条目并单独提交。
+diff --git a/packages/common/README.md b/packages/common/README.md
+new file mode 100644
+index 0000000..bcd8f98
+--- /dev/null
++++ b/packages/common/README.md
+@@ -0,0 +1,44 @@
++# vpp-common
++
++`vpp-common` 是八个 FastAPI 后端共享的最小公共包，版本冻结为 `0.1.0`。它只提供统一响应、错误码、异常处理、`traceId`、业务 ID、UTC 时间和跨模块基础 Schema。
++
++## 安装
++
++在仓库根目录使用 Python 3.11：
++
++```powershell
++python -m pip install -e "packages/common[test]"
++```
++
++业务服务必须依赖此包，不得复制响应或错误码实现。模块专属 DTO、数据库模型、环境配置和业务逻辑不得放入公共包。
++
++## 使用
++
++```python
++from fastapi import FastAPI
++from vpp_common import install_exception_handlers, new_id, success
++
++app = FastAPI()
++install_exception_handlers(app)
++
++
++@app.get("/health")
++def health():
++    return success({"service": "example", "status": "healthy"})
++
++
++asset_id = new_id("asset_")
++```
++
++`install_exception_handlers()` 同时安装追踪中间件：读取或生成 `X-Trace-Id`，在当前请求的响应体、响应头及下游调用中复用同一个值。
++
++`success(data)` 的 `message` 固定为 `ok`；`failure(code)` 和 `ServiceError(code)` 的 `message` 固定取自错误码目录，三个公开 API 均不接受调用方覆盖 message。成功 JSON 固定包含 `code`、`message`、`data`、`traceId`、`timestamp`；失败 JSON 只有存在字段详情时才增加 `details`。
++
++标准 HTTP 异常保留原 HTTP 状态，只透传 `Allow`、`WWW-Authenticate`、`Retry-After` 三个协议头，且不会把异常 `detail` 返回客户端。
++
++## 公共 API 冻结规则
++
++- 当前公共 API 版本：`0.1.0`。
++- 接口变更必须先更新正式契约文档并由技术负责人批准。
++- 只允许向后兼容的阻塞修复进入第一周公共包。
++- 错误码与 ID 前缀分别以 `docs/api/response-and-errors.md` 和本包常量为准。
+diff --git a/packages/common/pyproject.toml b/packages/common/pyproject.toml
+new file mode 100644
+index 0000000..e7bebab
+--- /dev/null
++++ b/packages/common/pyproject.toml
+@@ -0,0 +1,23 @@
++[build-system]
++requires = ["setuptools>=75"]
++build-backend = "setuptools.build_meta"
++
++[project]
++name = "vpp-common"
++version = "0.1.0"
++description = "Cross-service response, error, tracing, ID, and base schema utilities."
++readme = "README.md"
++requires-python = ">=3.11,<3.12"
++dependencies = [
++  "fastapi>=0.115,<1",
++  "pydantic>=2,<3",
++]
++
++[project.optional-dependencies]
++test = [
++  "httpx>=0.28,<1",
++  "pytest>=8,<9",
++]
++
++[tool.setuptools.packages.find]
++where = ["src"]
+diff --git a/packages/common/src/vpp_common/__init__.py b/packages/common/src/vpp_common/__init__.py
+new file mode 100644
+index 0000000..d74ae8c
+--- /dev/null
++++ b/packages/common/src/vpp_common/__init__.py
+@@ -0,0 +1,18 @@
++from .errors import ErrorCode
++from .fastapi_support import ServiceError, install_exception_handlers
++from .id_generator import new_id
++from .response import ApiResponse, failure, success
++from .time_utils import utc_now_iso
++from .tracing import resolve_trace_id
++
++__all__ = [
++    "ApiResponse",
++    "ErrorCode",
++    "ServiceError",
++    "failure",
++    "install_exception_handlers",
++    "new_id",
++    "resolve_trace_id",
++    "success",
++    "utc_now_iso",
++]
+diff --git a/packages/common/src/vpp_common/errors.py b/packages/common/src/vpp_common/errors.py
+new file mode 100644
+index 0000000..0b88ac7
+--- /dev/null
++++ b/packages/common/src/vpp_common/errors.py
+@@ -0,0 +1,92 @@
++from enum import IntEnum
++
++
++class ErrorCode(IntEnum):
++    INVALID_REQUEST = 40001
++    MISSING_REQUIRED_FIELD = 40002
++    INVALID_TIMESTAMP = 40003
++    INVALID_ENUM_VALUE = 40004
++    PAYLOAD_TOO_LARGE = 40005
++
++    MISSING_IDENTITY = 40101
++    INVALID_DID = 40102
++    INVALID_SIGNATURE = 40103
++    INVALID_HASH = 40104
++
++    ACCESS_DENIED = 40301
++    AUTHORIZATION_REQUIRED = 40302
++    AUTHORIZATION_EXPIRED = 40303
++
++    RESOURCE_NOT_FOUND = 40401
++    BUSINESS_NOT_FOUND = 40402
++    TRAINING_TASK_NOT_FOUND = 40403
++    MODEL_VERSION_NOT_FOUND = 40404
++
++    IDEMPOTENCY_CONFLICT = 40901
++    INVALID_RESOURCE_STATE = 40902
++    DUPLICATE_EVENT = 40903
++
++    PARTICIPANTS_NOT_READY = 42201
++    INSUFFICIENT_UPDATES = 42202
++    UNSUPPORTED_PRIVACY_MODE = 42203
++    INVALID_TRAINING_CONFIGURATION = 42204
++
++    RATE_LIMIT_EXCEEDED = 42901
++
++    INTERNAL_ERROR = 50001
++    STORAGE_ERROR = 50002
++    SERIALIZATION_ERROR = 50003
++
++    DOWNSTREAM_REJECTED = 50201
++    DOWNSTREAM_INVALID_RESPONSE = 50202
++    DOWNSTREAM_UNAVAILABLE = 50203
++
++    SERVICE_UNAVAILABLE = 50301
++    DEPENDENCY_UNAVAILABLE = 50302
++    MAINTENANCE_MODE = 50303
++
++    DOWNSTREAM_TIMEOUT = 50401
++
++
++ERROR_MESSAGES: dict[ErrorCode, str] = {
++    ErrorCode.INVALID_REQUEST: "invalid request",
++    ErrorCode.MISSING_REQUIRED_FIELD: "missing required field",
++    ErrorCode.INVALID_TIMESTAMP: "invalid timestamp",
++    ErrorCode.INVALID_ENUM_VALUE: "invalid enum value",
++    ErrorCode.PAYLOAD_TOO_LARGE: "payload too large",
++    ErrorCode.MISSING_IDENTITY: "missing identity",
++    ErrorCode.INVALID_DID: "invalid did",
++    ErrorCode.INVALID_SIGNATURE: "invalid signature",
++    ErrorCode.INVALID_HASH: "invalid hash",
++    ErrorCode.ACCESS_DENIED: "access denied",
++    ErrorCode.AUTHORIZATION_REQUIRED: "authorization required",
++    ErrorCode.AUTHORIZATION_EXPIRED: "authorization expired",
++    ErrorCode.RESOURCE_NOT_FOUND: "resource not found",
++    ErrorCode.BUSINESS_NOT_FOUND: "business not found",
++    ErrorCode.TRAINING_TASK_NOT_FOUND: "training task not found",
++    ErrorCode.MODEL_VERSION_NOT_FOUND: "model version not found",
++    ErrorCode.IDEMPOTENCY_CONFLICT: "idempotency conflict",
++    ErrorCode.INVALID_RESOURCE_STATE: "invalid resource state",
++    ErrorCode.DUPLICATE_EVENT: "duplicate event",
++    ErrorCode.PARTICIPANTS_NOT_READY: "participants not ready",
++    ErrorCode.INSUFFICIENT_UPDATES: "insufficient updates",
++    ErrorCode.UNSUPPORTED_PRIVACY_MODE: "unsupported privacy mode",
++    ErrorCode.INVALID_TRAINING_CONFIGURATION: "invalid training configuration",
++    ErrorCode.RATE_LIMIT_EXCEEDED: "rate limit exceeded",
++    ErrorCode.INTERNAL_ERROR: "internal error",
++    ErrorCode.STORAGE_ERROR: "storage error",
++    ErrorCode.SERIALIZATION_ERROR: "serialization error",
++    ErrorCode.DOWNSTREAM_REJECTED: "downstream rejected",
++    ErrorCode.DOWNSTREAM_INVALID_RESPONSE: "downstream invalid response",
++    ErrorCode.DOWNSTREAM_UNAVAILABLE: "downstream unavailable",
++    ErrorCode.SERVICE_UNAVAILABLE: "service unavailable",
++    ErrorCode.DEPENDENCY_UNAVAILABLE: "dependency unavailable",
++    ErrorCode.MAINTENANCE_MODE: "maintenance mode",
++    ErrorCode.DOWNSTREAM_TIMEOUT: "downstream timeout",
++}
++
++
++def http_status_for(code: ErrorCode | int) -> int:
++    error_code = ErrorCode(code)
++    status = int(error_code) // 100
++    return status if status in {400, 401, 403, 404, 409, 422, 429, 500, 502, 503, 504} else 500
+diff --git a/packages/common/src/vpp_common/fastapi_support.py b/packages/common/src/vpp_common/fastapi_support.py
+new file mode 100644
+index 0000000..8473804
+--- /dev/null
++++ b/packages/common/src/vpp_common/fastapi_support.py
+@@ -0,0 +1,145 @@
++from collections.abc import Mapping, Sequence
++
++from fastapi import FastAPI, Request
++from fastapi.exceptions import RequestValidationError
++from fastapi.responses import JSONResponse
++from starlette.exceptions import HTTPException as StarletteHTTPException
++
++from .errors import ERROR_MESSAGES, ErrorCode, http_status_for
++from .response import failure
++from .schemas import ErrorDetail
++from .tracing import (
++    TRACE_HEADER,
++    reset_current_trace_id,
++    resolve_trace_id,
++    set_current_trace_id,
++)
++
++
++_HTTP_STATUS_ERROR_CODES: dict[int, ErrorCode] = {
++    400: ErrorCode.INVALID_REQUEST,
++    401: ErrorCode.MISSING_IDENTITY,
++    403: ErrorCode.ACCESS_DENIED,
++    404: ErrorCode.RESOURCE_NOT_FOUND,
++    409: ErrorCode.IDEMPOTENCY_CONFLICT,
++    422: ErrorCode.PARTICIPANTS_NOT_READY,
++    429: ErrorCode.RATE_LIMIT_EXCEEDED,
++    500: ErrorCode.INTERNAL_ERROR,
++    502: ErrorCode.DOWNSTREAM_REJECTED,
++    503: ErrorCode.SERVICE_UNAVAILABLE,
++    504: ErrorCode.DOWNSTREAM_TIMEOUT,
++}
++_FORWARDED_HTTP_HEADERS = {
++    "allow": "Allow",
++    "www-authenticate": "WWW-Authenticate",
++    "retry-after": "Retry-After",
++}
++
++
++class ServiceError(Exception):
++    def __init__(
++        self,
++        code: ErrorCode | int,
++        *,
++        details: Sequence[ErrorDetail] | None = None,
++    ) -> None:
++        self.code = ErrorCode(code)
++        self.message = ERROR_MESSAGES[self.code]
++        self.details = list(details) if details else None
++        super().__init__(self.message)
++
++
++def _error_code_for_http_status(status_code: int) -> ErrorCode:
++    if status_code in _HTTP_STATUS_ERROR_CODES:
++        return _HTTP_STATUS_ERROR_CODES[status_code]
++    if 400 <= status_code < 500:
++        return ErrorCode.INVALID_REQUEST
++    return ErrorCode.INTERNAL_ERROR
++
++
++def _filtered_http_headers(
++    headers: Mapping[str, str] | None,
++) -> dict[str, str]:
++    if not headers:
++        return {}
++    return {
++        _FORWARDED_HTTP_HEADERS[name.lower()]: value
++        for name, value in headers.items()
++        if name.lower() in _FORWARDED_HTTP_HEADERS
++    }
++
++
++def _json_error(
++    code: ErrorCode,
++    trace_id: str,
++    *,
++    details: list[ErrorDetail] | None = None,
++    status_code: int | None = None,
++    headers: Mapping[str, str] | None = None,
++) -> JSONResponse:
++    body = failure(
++        code,
++        trace_id=trace_id,
++        details=details,
++    )
++    response_headers = {TRACE_HEADER: trace_id}
++    response_headers.update(_filtered_http_headers(headers))
++    return JSONResponse(
++        status_code=status_code if status_code is not None else http_status_for(code),
++        content=body.model_dump(exclude={"details"} if details is None else set()),
++        headers=response_headers,
++    )
++
++
++def install_exception_handlers(app: FastAPI) -> None:
++    """Install the frozen trace middleware and unified exception handlers."""
++
++    @app.middleware("http")
++    async def trace_middleware(request: Request, call_next):
++        trace_id = resolve_trace_id(request.headers.get(TRACE_HEADER))
++        request.state.trace_id = trace_id
++        token = set_current_trace_id(trace_id)
++        try:
++            response = await call_next(request)
++            response.headers[TRACE_HEADER] = trace_id
++            return response
++        finally:
++            reset_current_trace_id(token)
++
++    @app.exception_handler(ServiceError)
++    async def service_error_handler(request: Request, exc: ServiceError):
++        return _json_error(
++            exc.code,
++            request.state.trace_id,
++            details=exc.details,
++        )
++
++    @app.exception_handler(RequestValidationError)
++    async def validation_error_handler(request: Request, exc: RequestValidationError):
++        details = [
++            ErrorDetail(
++                field=".".join(str(item) for item in error["loc"] if item != "body"),
++                reason=error["msg"],
++            )
++            for error in exc.errors()
++        ]
++        return _json_error(
++            ErrorCode.INVALID_REQUEST,
++            request.state.trace_id,
++            details=details,
++        )
++
++    @app.exception_handler(StarletteHTTPException)
++    async def http_exception_handler(
++        request: Request, exc: StarletteHTTPException
++    ):
++        return _json_error(
++            _error_code_for_http_status(exc.status_code),
++            request.state.trace_id,
++            status_code=exc.status_code,
++            headers=exc.headers,
++        )
++
++    @app.exception_handler(Exception)
++    async def internal_error_handler(request: Request, exc: Exception):
++        return _json_error(ErrorCode.INTERNAL_ERROR, request.state.trace_id)
+diff --git a/packages/common/src/vpp_common/id_generator.py b/packages/common/src/vpp_common/id_generator.py
+new file mode 100644
+index 0000000..dcdb35e
+--- /dev/null
++++ b/packages/common/src/vpp_common/id_generator.py
+@@ -0,0 +1,29 @@
++from secrets import token_hex
++
++
++ALLOWED_ID_PREFIXES = frozenset(
++    {
++        "demo_",
++        "batch_",
++        "reading_",
++        "asset_",
++        "auth_",
++        "fl_task_",
++        "aggregate_",
++        "global_model_v",
++        "prediction_",
++        "strategy_",
++        "report_",
++        "evt_",
++        "tx_",
++        "trace_",
++    }
++)
++
++
++def new_id(prefix: str) -> str:
++    """Generate a unique opaque ID with one of the frozen cross-module prefixes."""
++    if prefix not in ALLOWED_ID_PREFIXES:
++        allowed = ", ".join(sorted(ALLOWED_ID_PREFIXES))
++        raise ValueError(f"unsupported ID prefix {prefix!r}; allowed prefixes: {allowed}")
++    return f"{prefix}{token_hex(8)}"
+diff --git a/packages/common/src/vpp_common/response.py b/packages/common/src/vpp_common/response.py
+new file mode 100644
+index 0000000..4f4377d
+--- /dev/null
++++ b/packages/common/src/vpp_common/response.py
+@@ -0,0 +1,58 @@
++from typing import Generic, TypeVar
++
++from pydantic import BaseModel, ConfigDict, Field, model_serializer
++
++from .errors import ERROR_MESSAGES, ErrorCode
++from .schemas import ErrorDetail
++from .time_utils import utc_now_iso
++from .tracing import resolve_trace_id
++
++
++T = TypeVar("T")
++
++
++class ApiResponse(BaseModel, Generic[T]):
++    model_config = ConfigDict(extra="forbid")
++
++    code: int
++    message: str
++    data: T | None
++    traceId: str
++    timestamp: str = Field(default_factory=utc_now_iso)
++    details: list[ErrorDetail] | None = None
++
++    @model_serializer(mode="wrap")
++    def _serialize_without_empty_details(self, handler):
++        serialized = handler(self)
++        if serialized.get("details") is None:
++            serialized.pop("details", None)
++        return serialized
++
++
++def success(
++    data: T | None = None,
++    *,
++    trace_id: str | None = None,
++) -> ApiResponse[T]:
++    return ApiResponse(
++        code=0,
++        message="ok",
++        data=data,
++        traceId=resolve_trace_id(trace_id),
++    )
++
++
++def failure(
++    code: ErrorCode | int,
++    *,
++    trace_id: str | None = None,
++    details: list[ErrorDetail] | None = None,
++) -> ApiResponse[None]:
++    error_code = ErrorCode(code)
++    return ApiResponse(
++        code=int(error_code),
++        message=ERROR_MESSAGES[error_code],
++        data=None,
++        traceId=resolve_trace_id(trace_id),
++        details=details,
++    )
+diff --git a/packages/common/src/vpp_common/schemas.py b/packages/common/src/vpp_common/schemas.py
+new file mode 100644
+index 0000000..d3a2955
+--- /dev/null
++++ b/packages/common/src/vpp_common/schemas.py
+@@ -0,0 +1,15 @@
++from pydantic import BaseModel, ConfigDict
++
++
++class CommonSchema(BaseModel):
++    model_config = ConfigDict(extra="forbid")
++
++
++class HealthData(CommonSchema):
++    service: str
++    status: str
++
++
++class ErrorDetail(CommonSchema):
++    field: str
++    reason: str
+diff --git a/packages/common/src/vpp_common/time_utils.py b/packages/common/src/vpp_common/time_utils.py
+new file mode 100644
+index 0000000..90a02b7
+--- /dev/null
++++ b/packages/common/src/vpp_common/time_utils.py
+@@ -0,0 +1,8 @@
++from datetime import datetime, timezone
++
++
++def utc_now_iso() -> str:
++    """Return a timezone-aware ISO 8601 timestamp in UTC."""
++    return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace(
++        "+00:00", "Z"
++    )
+diff --git a/packages/common/src/vpp_common/tracing.py b/packages/common/src/vpp_common/tracing.py
+new file mode 100644
+index 0000000..126ff04
+--- /dev/null
++++ b/packages/common/src/vpp_common/tracing.py
+@@ -0,0 +1,32 @@
++import re
++from contextvars import ContextVar, Token
++
++from .id_generator import new_id
++
++
++TRACE_HEADER = "X-Trace-Id"
++MAX_TRACE_ID_LENGTH = 128
++_TRACE_PATTERN = re.compile(r"^trace_[A-Za-z0-9._:-]*$")
++_current_trace_id: ContextVar[str | None] = ContextVar(
++    "vpp_trace_id", default=None
++)
++
++
++def _is_valid_trace_id(value: str) -> bool:
++    return len(value) <= MAX_TRACE_ID_LENGTH and _TRACE_PATTERN.fullmatch(value) is not None
++
++
++def resolve_trace_id(incoming: str | None = None) -> str:
++    """Preserve a valid incoming trace ID or generate a safe replacement."""
++    candidate = incoming or _current_trace_id.get()
++    if candidate and _is_valid_trace_id(candidate):
++        return candidate
++    return new_id("trace_")
++
++
++def set_current_trace_id(trace_id: str) -> Token[str | None]:
++    return _current_trace_id.set(trace_id)
++
++
++def reset_current_trace_id(token: Token[str | None]) -> None:
++    _current_trace_id.reset(token)
+diff --git a/packages/common/tests/test_fastapi_support.py b/packages/common/tests/test_fastapi_support.py
+new file mode 100644
+index 0000000..d86a4ef
+--- /dev/null
++++ b/packages/common/tests/test_fastapi_support.py
+@@ -0,0 +1,232 @@
++import pytest
++from fastapi import FastAPI, HTTPException
++from fastapi.testclient import TestClient
++from pydantic import BaseModel
++
++from vpp_common.errors import ErrorCode
++from vpp_common.fastapi_support import ServiceError, install_exception_handlers
++from vpp_common.response import success
++from vpp_common.schemas import ErrorDetail
++
++
++class Payload(BaseModel):
++    value: int
++
++
++def build_app() -> FastAPI:
++    app = FastAPI()
++    install_exception_handlers(app)
++
++    @app.get("/ok")
++    def ok():
++        return success({"status": "ready"})
++
++    @app.get("/service-error")
++    def service_error():
++        raise ServiceError(
++            ErrorCode.RESOURCE_NOT_FOUND,
++            details=[ErrorDetail(field="assetId", reason="not found")],
++        )
++
++    @app.post("/validation-error")
++    def validation_error(payload: Payload):
++        return success(payload.model_dump())
++
++    @app.get("/internal-error")
++    def internal_error():
++        raise RuntimeError("secret implementation detail")
++
++    @app.get("/http-not-found")
++    def http_not_found():
++        raise HTTPException(status_code=404, detail="secret HTTP exception detail")
++
++    @app.get("/http-error/{status_code}")
++    def http_error(status_code: int):
++        raise HTTPException(
++            status_code=status_code,
++            detail=f"secret HTTP {status_code} detail",
++        )
++
++    @app.get("/http-unauthorized")
++    def http_unauthorized():
++        raise HTTPException(
++            status_code=401,
++            detail="secret authentication detail",
++            headers={
++                "www-authenticate": 'Bearer realm="vpp"',
++                "Set-Cookie": "session=secret",
++                "X-Internal-Debug": "secret-debug-value",
++            },
++        )
++
++    @app.get("/http-rate-limited")
++    def http_rate_limited():
++        raise HTTPException(
++            status_code=429,
++            detail="secret limiter detail",
++            headers={
++                "rEtRy-AfTeR": "60",
++                "X-Custom-Rate-Policy": "internal-policy",
++            },
++        )
++
++    return app
++
++
++def test_trace_id_is_preserved_in_body_and_header():
++    client = TestClient(build_app())
++    response = client.get("/ok", headers={"X-Trace-Id": "trace_existing"})
++
++    assert response.status_code == 200
++    assert response.json()["traceId"] == "trace_existing"
++    assert response.headers["X-Trace-Id"] == "trace_existing"
++
++
++def test_success_http_json_has_exact_public_keys():
++    response = TestClient(build_app()).get("/ok")
++
++    assert response.status_code == 200
++    assert set(response.json()) == {
++        "code",
++        "message",
++        "data",
++        "traceId",
++        "timestamp",
++    }
++
++
++def test_service_error_uses_unified_envelope():
++    client = TestClient(build_app())
++    response = client.get("/service-error")
++
++    assert response.status_code == 404
++    assert response.json()["code"] == 40401
++    assert response.json()["data"] is None
++    assert response.json()["details"] == [
++        {"field": "assetId", "reason": "not found"}
++    ]
++    assert response.json()["traceId"].startswith("trace_")
++    assert set(response.json()) == {
++        "code",
++        "message",
++        "data",
++        "traceId",
++        "timestamp",
++        "details",
++    }
++
++
++def test_validation_error_is_normalized():
++    client = TestClient(build_app())
++    response = client.post("/validation-error", json={"value": "wrong"})
++
++    assert response.status_code == 400
++    assert response.json()["code"] == 40001
++    assert response.json()["message"] == "invalid request"
++    assert response.json()["details"]
++
++
++def test_internal_error_does_not_leak_exception_message():
++    client = TestClient(build_app(), raise_server_exceptions=False)
++    response = client.get("/internal-error")
++
++    assert response.status_code == 500
++    assert response.json()["code"] == 50001
++    assert response.json()["message"] == "internal error"
++    assert "secret implementation detail" not in response.text
++
++
++def test_http_not_found_is_normalized_without_detail_leakage():
++    client = TestClient(build_app())
++    response = client.get(
++        "/http-not-found", headers={"X-Trace-Id": "trace_existing"}
++    )
++
++    assert response.status_code == 404
++    assert response.json()["code"] == 40401
++    assert response.json()["data"] is None
++    assert response.json()["traceId"] == "trace_existing"
++    assert response.headers["X-Trace-Id"] == "trace_existing"
++    assert set(response.json()) == {
++        "code",
++        "message",
++        "data",
++        "traceId",
++        "timestamp",
++    }
++    assert "secret HTTP exception detail" not in response.text
++
++
++@pytest.mark.parametrize(
++    ("status_code", "business_code"),
++    [
++        (400, 40001),
++        (401, 40101),
++        (403, 40301),
++        (404, 40401),
++        (409, 40901),
++        (418, 40001),
++        (422, 42201),
++        (429, 42901),
++        (500, 50001),
++        (501, 50001),
++        (502, 50201),
++        (503, 50301),
++        (504, 50401),
++    ],
++)
++def test_http_exception_preserves_status_and_uses_frozen_business_code(
++    status_code: int, business_code: int
++):
++    response = TestClient(build_app()).get(f"/http-error/{status_code}")
++
++    assert response.status_code == status_code
++    assert response.json()["code"] == business_code
++    assert response.json()["data"] is None
++    assert "details" not in response.json()
++    assert f"secret HTTP {status_code} detail" not in response.text
++
++
++def test_real_http_401_preserves_auth_header_and_filters_other_headers():
++    response = TestClient(build_app()).get(
++        "/http-unauthorized", headers={"X-Trace-Id": "trace_auth"}
++    )
++
++    assert response.status_code == 401
++    assert response.json()["code"] == 40101
++    assert response.json()["message"] == "missing identity"
++    assert response.json()["traceId"] == "trace_auth"
++    assert response.headers["X-Trace-Id"] == "trace_auth"
++    assert response.headers["WWW-Authenticate"] == 'Bearer realm="vpp"'
++    assert "set-cookie" not in response.headers
++    assert "x-internal-debug" not in response.headers
++    assert "secret authentication detail" not in response.text
++
++
++def test_real_router_http_405_preserves_status_allow_and_trace_id():
++    response = TestClient(build_app()).post(
++        "/ok", headers={"X-Trace-Id": "trace_method"}
++    )
++
++    assert response.status_code == 405
++    assert response.json()["code"] == 40001
++    assert response.json()["message"] == "invalid request"
++    assert response.json()["traceId"] == "trace_method"
++    assert response.headers["X-Trace-Id"] == "trace_method"
++    assert response.headers["Allow"] == "GET"
++    assert "Method Not Allowed" not in response.text
++
++
++def test_real_http_429_preserves_retry_after_and_filters_custom_headers():
++    response = TestClient(build_app()).get(
++        "/http-rate-limited", headers={"X-Trace-Id": "trace_rate"}
++    )
++
++    assert response.status_code == 429
++    assert response.json()["code"] == 42901
++    assert response.json()["message"] == "rate limit exceeded"
++    assert response.json()["traceId"] == "trace_rate"
++    assert response.headers["X-Trace-Id"] == "trace_rate"
++    assert response.headers["Retry-After"] == "60"
++    assert "x-custom-rate-policy" not in response.headers
++    assert "secret limiter detail" not in response.text
+diff --git a/packages/common/tests/test_ids.py b/packages/common/tests/test_ids.py
+new file mode 100644
+index 0000000..1f2ff12
+--- /dev/null
++++ b/packages/common/tests/test_ids.py
+@@ -0,0 +1,41 @@
++import pytest
++
++from vpp_common.id_generator import ALLOWED_ID_PREFIXES, new_id
++
++
++EXPECTED_PREFIXES = {
++    "demo_",
++    "batch_",
++    "reading_",
++    "asset_",
++    "auth_",
++    "fl_task_",
++    "aggregate_",
++    "global_model_v",
++    "prediction_",
++    "strategy_",
++    "report_",
++    "evt_",
++    "tx_",
++    "trace_",
++}
++
++
++def test_frozen_id_prefixes_are_complete():
++    assert ALLOWED_ID_PREFIXES == frozenset(EXPECTED_PREFIXES)
++
++
++@pytest.mark.parametrize("prefix", sorted(EXPECTED_PREFIXES))
++def test_new_ids_use_requested_prefix(prefix):
++    generated = new_id(prefix)
++    assert generated.startswith(prefix)
++    assert len(generated) > len(prefix)
++
++
++def test_new_ids_are_unique():
++    assert new_id("asset_") != new_id("asset_")
++
++
++def test_unknown_id_prefix_is_rejected():
++    with pytest.raises(ValueError, match="unsupported ID prefix"):
++        new_id("unknown_")
+diff --git a/packages/common/tests/test_response.py b/packages/common/tests/test_response.py
+new file mode 100644
+index 0000000..072223d
+--- /dev/null
++++ b/packages/common/tests/test_response.py
+@@ -0,0 +1,112 @@
++from datetime import datetime
++from inspect import signature
++
++import pytest
++
++from vpp_common.errors import ERROR_MESSAGES, ErrorCode, http_status_for
++from vpp_common.fastapi_support import ServiceError
++from vpp_common.response import failure, success
++from vpp_common.schemas import ErrorDetail
++
++
++EXPECTED_ERROR_CODES = {
++    40001,
++    40002,
++    40003,
++    40004,
++    40005,
++    40101,
++    40102,
++    40103,
++    40104,
++    40301,
++    40302,
++    40303,
++    40401,
++    40402,
++    40403,
++    40404,
++    40901,
++    40902,
++    40903,
++    42201,
++    42202,
++    42203,
++    42204,
++    42901,
++    50001,
++    50002,
++    50003,
++    50201,
++    50202,
++    50203,
++    50301,
++    50302,
++    50303,
++    50401,
++}
++
++
++def test_success_builds_unified_envelope():
++    response = success({"assetId": "asset_001"}, trace_id="trace_existing")
++
++    assert response.code == 0
++    assert response.message == "ok"
++    assert response.data == {"assetId": "asset_001"}
++    assert response.traceId == "trace_existing"
++    assert response.details is None
++    assert datetime.fromisoformat(response.timestamp.replace("Z", "+00:00")).tzinfo is not None
++
++
++def test_failure_uses_catalog_message_and_details():
++    response = failure(
++        ErrorCode.INVALID_REQUEST,
++        trace_id="trace_existing",
++        details=[ErrorDetail(field="participants", reason="must not be empty")],
++    )
++
++    assert response.code == 40001
++    assert response.message == "invalid request"
++    assert response.data is None
++    assert response.traceId == "trace_existing"
++    assert response.details == [
++        ErrorDetail(field="participants", reason="must not be empty")
++    ]
++
++
++def test_response_builders_and_service_error_do_not_expose_message_override():
++    assert "message" not in signature(success).parameters
++    assert "message" not in signature(failure).parameters
++    assert "message" not in signature(ServiceError).parameters
++
++    with pytest.raises(TypeError):
++        success({}, message="caller controlled")
++    with pytest.raises(TypeError):
++        failure(ErrorCode.INVALID_REQUEST, message="caller controlled")
++    with pytest.raises(TypeError):
++        ServiceError(ErrorCode.INVALID_REQUEST, message="caller controlled")
++
++
++def test_every_error_code_has_one_stable_catalog_message():
++    assert len(set(ERROR_MESSAGES.values())) == len(ERROR_MESSAGES)
++    for code, message in ERROR_MESSAGES.items():
++        assert failure(code, trace_id="trace_existing").message == message
++
++
++def test_error_catalog_matches_frozen_document():
++    assert {int(code) for code in ErrorCode} == EXPECTED_ERROR_CODES
++    assert set(ERROR_MESSAGES) == {ErrorCode(value) for value in EXPECTED_ERROR_CODES}
++
++
++def test_error_code_prefix_maps_to_http_status():
++    assert http_status_for(ErrorCode.INVALID_REQUEST) == 400
++    assert http_status_for(ErrorCode.INVALID_DID) == 401
++    assert http_status_for(ErrorCode.ACCESS_DENIED) == 403
++    assert http_status_for(ErrorCode.RESOURCE_NOT_FOUND) == 404
++    assert http_status_for(ErrorCode.IDEMPOTENCY_CONFLICT) == 409
++    assert http_status_for(ErrorCode.INSUFFICIENT_UPDATES) == 422
++    assert http_status_for(ErrorCode.RATE_LIMIT_EXCEEDED) == 429
++    assert http_status_for(ErrorCode.INTERNAL_ERROR) == 500
++    assert http_status_for(ErrorCode.DOWNSTREAM_UNAVAILABLE) == 502
++    assert http_status_for(ErrorCode.SERVICE_UNAVAILABLE) == 503
++    assert http_status_for(ErrorCode.DOWNSTREAM_TIMEOUT) == 504
+diff --git a/packages/common/tests/test_tracing.py b/packages/common/tests/test_tracing.py
+new file mode 100644
+index 0000000..7a9cb86
+--- /dev/null
++++ b/packages/common/tests/test_tracing.py
+@@ -0,0 +1,25 @@
++from vpp_common.tracing import TRACE_HEADER, resolve_trace_id
++
++
++def test_trace_header_name_is_frozen():
++    assert TRACE_HEADER == "X-Trace-Id"
++
++
++def test_resolve_trace_id_preserves_valid_incoming():
++    assert resolve_trace_id("trace_existing") == "trace_existing"
++
++
++def test_resolve_trace_id_preserves_prefix_only_value():
++    assert resolve_trace_id("trace_") == "trace_"
++
++
++def test_resolve_trace_id_generates_when_missing():
++    generated = resolve_trace_id(None)
++    assert generated.startswith("trace_")
++    assert len(generated) > len("trace_")
++
++
++def test_resolve_trace_id_replaces_invalid_incoming():
++    assert resolve_trace_id("contains spaces").startswith("trace_")
++    assert resolve_trace_id("not-trace-prefixed").startswith("trace_")
++    assert resolve_trace_id("trace_" + "x" * 128).startswith("trace_")
+diff --git a/tests/integration/test_contract_docs.py b/tests/integration/test_contract_docs.py
+new file mode 100644
+index 0000000..8b69521
+--- /dev/null
++++ b/tests/integration/test_contract_docs.py
+@@ -0,0 +1,496 @@
++import json
++import re
++from pathlib import Path
++
++
++ROOT = Path(__file__).resolve().parents[2]
++GATEWAY_ONLY_POLICY = (
++    "第一周仅 `api-gateway` 负责跨模块编排和调用 `ledger-service`；"
++    "其他业务模块不得直接调用 `ledger-service`。"
++)
++BACKEND_MODULES = {
++    "api-gateway",
++    "meter-simulator",
++    "data-ingestion",
++    "identity-did",
++    "federated-learning",
++    "privacy-compute",
++    "ledger-service",
++    "ai-agent",
++}
++STANDARD_HTTP_METHODS = {
++    "GET",
++    "POST",
++    "PUT",
++    "PATCH",
++    "DELETE",
++    "HEAD",
++    "OPTIONS",
++    "TRACE",
++    "CONNECT",
++}
++ENDPOINT_REQUIREMENT_MARKERS = (
++    "**请求说明**：",
++    "**字段类型与必填性**：",
++    "**成功说明**：",
++    "**可能错误**：",
++    "**幂等规则**：",
++)
++FORMAL_UTF8_FILES = (
++    "docs/api/openapi.md",
++    "docs/api/response-and-errors.md",
++    "docs/design/main-flow.md",
++    "docs/design/module-contracts.md",
++    "docs/design/week-one-mock-delivery.md",
++    "packages/common/README.md",
++    "packages/common/pyproject.toml",
++    "packages/common/src/vpp_common/__init__.py",
++    "packages/common/src/vpp_common/errors.py",
++    "packages/common/src/vpp_common/fastapi_support.py",
++    "packages/common/src/vpp_common/response.py",
++    "packages/common/src/vpp_common/schemas.py",
++    "packages/common/tests/test_fastapi_support.py",
++    "packages/common/tests/test_response.py",
++    "tests/integration/test_contract_docs.py",
++)
++
++
++def read(relative_path: str) -> str:
++    return (ROOT / relative_path).read_text(encoding="utf-8")
++
++
++def numbered_section(text: str, number: int) -> str:
++    match = re.search(
++        rf"^## {number}\..*?(?=^## {number + 1}\.|\Z)",
++        text,
++        flags=re.MULTILINE | re.DOTALL,
++    )
++    assert match, f"missing section {number}"
++    return match.group(0)
++
++
++def endpoint_section(text: str, endpoint: str) -> str:
++    match = re.search(
++        rf"^### `{re.escape(endpoint)}`\n(.*?)(?=^### `|^## |\Z)",
++        text,
++        flags=re.MULTILINE | re.DOTALL,
++    )
++    assert match, f"missing endpoint section: {endpoint}"
++    return match.group(0)
++
++
++def json_after_label(section: str, label: str) -> dict:
++    match = re.search(
++        rf"^{re.escape(label)}\n\n```json\n(.*?)\n```",
++        section,
++        flags=re.MULTILINE | re.DOTALL,
++    )
++    assert match, f"missing JSON example after {label!r}"
++    return json.loads(match.group(1))
++
++
++def external_interface_http_block(module_section: str) -> str:
++    match = re.search(
++        r"^### 对外接口\n\n```http\n(.*?)\n```",
++        module_section,
++        flags=re.MULTILINE | re.DOTALL,
++    )
++    assert match, "missing HTTP block immediately after the external-interface heading"
++    return match.group(1)
++
++
++def parse_http_endpoints(http_block: str) -> list[tuple[str, str]]:
++    return re.findall(r"^([A-Z]+) (\S+)$", http_block, re.MULTILINE)
++
++
++def coverage_matrix_rows(text: str) -> list[tuple[str, str, str]]:
++    return re.findall(
++        r"^\|\s*([^|]+?)\s*\|\s*([A-Z]+)\s*\|\s*`([^`]+)`\s*\|$",
++        numbered_section(text, 3),
++        flags=re.MULTILINE,
++    )
++
++
++def assert_required_fields(value: dict, fields: tuple[str, ...]) -> None:
++    assert isinstance(value, dict)
++    for field in fields:
++        assert field in value
++
++
++def test_gateway_is_the_only_week_one_cross_module_orchestrator():
++    flow = read("docs/design/main-flow.md")
++    contracts = read("docs/design/module-contracts.md")
++
++    assert GATEWAY_ONLY_POLICY in flow
++    assert GATEWAY_ONLY_POLICY in contracts
++    assert "FL->>Privacy" not in flow
++    assert "FL->>Ledger" not in flow
++    assert "GW->>Privacy: POST /api/v1/privacy/secure-aggregate" in flow
++    assert "GW->>Ledger: secure_aggregation_finished" in flow
++
++
++def test_fl_start_response_json_contains_current_round_updates():
++    start = endpoint_section(
++        read("docs/api/openapi.md"),
++        "POST /api/v1/fl/tasks/{taskId}/start",
++    )
++    data = json_after_label(start, "成功 `data`：")
++
++    assert isinstance(data["updates"], list)
++    assert data["updates"]
++    assert_required_fields(
++        data["updates"][0],
++        ("participantDid", "sampleCount", "modelUpdateUri", "updateHash"),
++    )
++
++
++def test_privacy_secure_aggregate_request_and_response_json_are_directional():
++    aggregate = endpoint_section(
++        read("docs/api/openapi.md"),
++        "POST /api/v1/privacy/secure-aggregate",
++    )
++    request = json_after_label(aggregate, "请求：")
++    response = json_after_label(aggregate, "成功 `data`：")
++
++    assert_required_fields(request, ("trainingTaskId", "roundId", "updates", "privacyMode"))
++    assert isinstance(request["updates"], list)
++    assert request["updates"]
++    assert_required_fields(
++        request["updates"][0],
++        ("participantDid", "sampleCount", "modelUpdateUri", "updateHash"),
++    )
++    assert_required_fields(response, ("aggregateId", "aggregateResultUri", "aggregateHash"))
++
++
++def test_fl_aggregate_request_json_receives_privacy_result_before_fedavg():
++    aggregate = endpoint_section(
++        read("docs/api/openapi.md"),
++        "POST /api/v1/fl/tasks/{taskId}/rounds/{roundId}/aggregate",
++    )
++    request = json_after_label(aggregate, "请求：")
++
++    assert_required_fields(request, ("aggregateId", "aggregateResultUri", "aggregateHash"))
++    assert "FedAvg" in aggregate
++
++
++def test_fl_round_handoff_and_path_ids_are_frozen_in_openapi_json():
++    openapi = read("docs/api/openapi.md")
++    start = endpoint_section(openapi, "POST /api/v1/fl/tasks/{taskId}/start")
++    update = endpoint_section(
++        openapi,
++        "POST /api/v1/fl/tasks/{taskId}/rounds/{roundId}/updates",
++    )
++    aggregate = endpoint_section(
++        openapi,
++        "POST /api/v1/fl/tasks/{taskId}/rounds/{roundId}/aggregate",
++    )
++
++    start_data = json_after_label(start, "成功 `data`：")
++    update_request = json_after_label(update, "请求：")
++    aggregate_request = json_after_label(aggregate, "请求：")
++    running = json_after_label(aggregate, "非最终轮成功 `data`：")
++    completed = json_after_label(aggregate, "最终轮成功 `data`：")
++
++    assert "无请求体" in start
++    assert "`taskId` 仅来自路径" in start
++    assert start_data["currentRound"] == 1
++    assert start_data["updates"]
++    assert set(update_request) == {
++        "participantDid",
++        "sampleCount",
++        "modelUpdateUri",
++        "updateHash",
++    }
++    assert set(aggregate_request) == {
++        "aggregateId",
++        "aggregateResultUri",
++        "aggregateHash",
++    }
++    assert running["status"] == "running"
++    assert isinstance(running["nextRound"], int)
++    assert running["updates"]
++    assert_required_fields(
++        running["updates"][0],
++        ("participantDid", "sampleCount", "modelUpdateUri", "updateHash"),
++    )
++    assert completed["status"] == "completed"
++    assert completed["nextRound"] is None
++    assert completed["updates"] == []
++    assert_required_fields(
++        completed,
++        ("globalModelVersion", "modelHash", "metrics"),
++    )
++
++
++def test_fl_round_handoff_is_synchronized_across_design_documents():
++    flow = numbered_section(read("docs/design/main-flow.md"), 4)
++    contracts = numbered_section(read("docs/design/module-contracts.md"), 8)
++
++    update_request = json_after_label(contracts, "本地参数上传请求：")
++    aggregate_request = json_after_label(contracts, "FedAvg 聚合请求：")
++    running = json_after_label(contracts, "非最终轮聚合输出：")
++    completed = json_after_label(contracts, "最终轮聚合输出：")
++
++    assert "每轮" in flow
++    assert "status: running" in flow
++    assert "nextRound" in flow
++    assert "status: completed" in flow
++    assert "nextRound: null" in flow
++    assert set(update_request) == {
++        "participantDid",
++        "sampleCount",
++        "modelUpdateUri",
++        "updateHash",
++    }
++    assert set(aggregate_request) == {
++        "aggregateId",
++        "aggregateResultUri",
++        "aggregateHash",
++    }
++    assert running["status"] == "running"
++    assert isinstance(running["nextRound"], int)
++    assert running["updates"]
++    assert completed["status"] == "completed"
++    assert completed["nextRound"] is None
++    assert completed["updates"] == []
++
++
++def test_data_ingest_is_the_main_flow_while_asset_registration_stays_separate():
++    openapi = read("docs/api/openapi.md")
++    flow = read("docs/design/main-flow.md")
++    contracts = read("docs/design/module-contracts.md")
++    ingest = endpoint_section(openapi, "POST /api/v1/data/ingest")
++    assets = endpoint_section(openapi, "POST /api/v1/data/assets")
++
++    assert "GW->>Ingest: POST /api/v1/data/ingest" in flow
++    assert "Ingest-->>GW: assetId" in flow
++    assert "assetId" in ingest
++    assert "第一周一键演示主流程" in assets
++    assert "POST /api/v1/data/ingest" in numbered_section(contracts, 6)
++    assert "POST /api/v1/data/assets" in numbered_section(contracts, 6)
++
++
++def test_demo_data_json_and_module_contract_example_exclude_common_envelope():
++    openapi = read("docs/api/openapi.md")
++    contracts = read("docs/design/module-contracts.md")
++    demo = endpoint_section(openapi, "POST /api/v1/demo/run")
++    data = json_after_label(demo, "成功 `data`：")
++    module_data = json_after_label(numbered_section(contracts, 3), "返回示例：")
++
++    required = (
++        "businessId",
++        "metrics",
++        "predictionId",
++        "strategyId",
++        "auditReportId",
++        "ledgerTxIds",
++    )
++    assert_required_fields(data, required)
++    assert_required_fields(module_data, required)
++    for example in (data, module_data):
++        assert "traceId" not in example
++        assert "code" not in example
++        assert "message" not in example
++        assert "data" not in example
++    assert "公共包络" in demo
++    assert "response-and-errors.md" in contracts
++
++
++def test_key_demo_and_agent_examples_are_parseable_json():
++    openapi = read("docs/api/openapi.md")
++    demo = endpoint_section(openapi, "POST /api/v1/demo/run")
++    predict = endpoint_section(openapi, "POST /api/v1/agent/predict")
++    strategy = endpoint_section(openapi, "POST /api/v1/agent/trading-strategy")
++    question = endpoint_section(openapi, "POST /api/v1/agent/audit-question")
++    report = endpoint_section(openapi, "POST /api/v1/agent/audit-report")
++
++    examples = (
++        json_after_label(demo, "请求："),
++        json_after_label(demo, "成功 `data`："),
++        json_after_label(predict, "请求："),
++        json_after_label(predict, "成功 `data`："),
++        json_after_label(strategy, "请求："),
++        json_after_label(strategy, "成功 `data`："),
++        json_after_label(question, "请求："),
++        json_after_label(question, "成功 `data`："),
++        json_after_label(report, "请求："),
++        json_after_label(report, "成功 `data`："),
++    )
++
++    assert all(isinstance(example, dict) and example for example in examples)
++
++
++def test_agent_audit_request_json_uses_gateway_supplied_ledger_evidence():
++    openapi = read("docs/api/openapi.md")
++    flow = read("docs/design/main-flow.md")
++    agent_contract = numbered_section(read("docs/design/module-contracts.md"), 11)
++    question = endpoint_section(openapi, "POST /api/v1/agent/audit-question")
++    report = endpoint_section(openapi, "POST /api/v1/agent/audit-report")
++    question_request = json_after_label(question, "请求：")
++    report_request = json_after_label(report, "请求：")
++
++    assert_required_fields(
++        question_request,
++        ("businessId", "modelVersion", "evidenceEventIds", "question"),
++    )
++    assert_required_fields(
++        report_request,
++        ("businessId", "modelVersion", "evidenceEventIds", "reportType"),
++    )
++    assert isinstance(question_request["evidenceEventIds"], list)
++    assert isinstance(report_request["evidenceEventIds"], list)
++    assert "网关查询账本后提供" in question
++    assert "网关查询账本后提供" in report
++    assert "网关提供的 `evidenceEventIds`" in agent_contract
++    assert "不直接调用账本服务" in agent_contract
++    assert "网关查询账本证据链后提供 `evidenceEventIds`" in flow
++
++
++def test_http_endpoint_parser_accepts_all_standard_methods():
++    block = "\n".join(f"{method} /example" for method in sorted(STANDARD_HTTP_METHODS))
++    assert {method for method, _ in parse_http_endpoints(block)} == STANDARD_HTTP_METHODS
++
++
++def test_openapi_matrix_and_endpoint_h3_sections_match_bidirectionally():
++    openapi = read("docs/api/openapi.md")
++    matrix_rows = coverage_matrix_rows(openapi)
++    matrix_endpoints = {(method, path) for _, method, path in matrix_rows}
++    h3_endpoints = re.findall(
++        r"^### `([A-Z]+) ([^`]+)`$",
++        openapi,
++        flags=re.MULTILINE,
++    )
++
++    assert len(h3_endpoints) == len(set(h3_endpoints))
++    assert set(h3_endpoints) == matrix_endpoints
++
++
++def test_every_openapi_endpoint_has_complete_implementation_contract():
++    openapi = read("docs/api/openapi.md")
++    for _, method, path in coverage_matrix_rows(openapi):
++        endpoint = f"{method} {path}"
++        section = endpoint_section(openapi, endpoint)
++        for marker in ENDPOINT_REQUIREMENT_MARKERS:
++            assert marker in section, f"{endpoint} missing {marker}"
++        fields = re.search(
++            r"^\*\*字段类型与必填性\*\*：(.*)$",
++            section,
++            flags=re.MULTILINE,
++        )
++        assert fields
++        assert "必填" in fields.group(1) or "无请求字段" in fields.group(1)
++        assert "请求体" in section
++        assert re.search(r"^\*\*成功说明\*\*：.*`data`", section, re.MULTILINE)
++        if method == "GET":
++            assert "无请求体" in section, f"{endpoint} must declare no request body"
++            assert "不适用" in section, f"{endpoint} must declare idempotency inapplicable"
++        else:
++            assert "Idempotency-Key" in section, f"{endpoint} missing write idempotency rule"
++        assert "response-and-errors.md" in section, f"{endpoint} must reference common errors"
++
++
++def test_openapi_coverage_matrix_matches_each_backend_external_interface():
++    openapi = read("docs/api/openapi.md")
++    contracts = read("docs/design/module-contracts.md")
++    matrix = numbered_section(openapi, 3)
++    matrix_rows = coverage_matrix_rows(openapi)
++    matrix_modules = {module for module, _, _ in matrix_rows}
++    expected_modules = BACKEND_MODULES | {"所有服务"}
++
++    assert matrix_modules == expected_modules
++    assert len(matrix_rows) == len(set(matrix_rows))
++    assert all(method in STANDARD_HTTP_METHODS for _, method, _ in matrix_rows)
++    assert {
++        (method, path)
++        for module, method, path in matrix_rows
++        if module == "所有服务"
++    } == {("GET", "/health")}
++
++    module_sections = {
++        "api-gateway": numbered_section(contracts, 4),
++        "meter-simulator": numbered_section(contracts, 5),
++        "data-ingestion": numbered_section(contracts, 6),
++        "identity-did": numbered_section(contracts, 7),
++        "federated-learning": numbered_section(contracts, 8),
++        "privacy-compute": numbered_section(contracts, 9),
++        "ledger-service": numbered_section(contracts, 10),
++        "ai-agent": numbered_section(contracts, 11),
++    }
++    for module, section in module_sections.items():
++        external_rows = parse_http_endpoints(external_interface_http_block(section))
++        assert len(external_rows) == len(set(external_rows))
++        assert all(method in STANDARD_HTTP_METHODS for method, _ in external_rows)
++        assert set(external_rows) == {
++            (method, path)
++            for matrix_module, method, path in matrix_rows
++            if matrix_module == module
++        } | {("GET", "/health")}
++
++
++def test_public_response_document_matches_actual_frozen_key_sets():
++    response_doc = read("docs/api/response-and-errors.md")
++    success_section = numbered_section(response_doc, 2)
++    failure_section = numbered_section(response_doc, 3)
++    success_example = json_after_label(success_section, "成功响应示例：")
++    failure_example = json_after_label(failure_section, "失败响应示例：")
++
++    assert "requestId" not in response_doc
++    assert set(success_example) == {
++        "code",
++        "message",
++        "data",
++        "traceId",
++        "timestamp",
++    }
++    assert set(failure_example) == {
++        "code",
++        "message",
++        "data",
++        "traceId",
++        "timestamp",
++        "details",
++    }
++    assert re.search(r"\| `timestamp` \| string \| 是 \|", success_section)
++    assert "仅在存在字段级详情时返回 `details`" in failure_section
++
++
++def test_common_package_contract_excludes_module_specific_and_security_helpers():
++    common = numbered_section(read("docs/design/module-contracts.md"), 13)
++
++    for responsibility in (
++        "统一响应",
++        "错误码",
++        "traceId",
++        "UTC 时间",
++        "冻结 ID",
++        "HealthData",
++        "ErrorDetail",
++    ):
++        assert responsibility in common
++    for excluded in ("模块专属 DTO", "哈希", "签名", "加密", "业务工具"):
++        assert excluded in common
++    assert "不属于公共包" in common
++    assert "源端可信采集" in common
++    assert "hashing.py" not in common
++    assert "通用 DTO/Schema" not in common
++
++
++def test_week_one_contract_ambiguities_are_recorded_as_completed_decisions():
++    week_one = read("docs/design/week-one-mock-delivery.md")
++
++    assert "### 3.1 已冻结决策与完成状态" in week_one
++    assert "Day 1 必须消除的契约歧义" not in week_one
++    assert "当前接口文档存在以下联调歧义" not in week_one
++    assert "`traceId` 只存在于公共响应包络" in week_one
++
++
++def test_formal_files_are_utf8_without_bom_and_repository_freezes_lf():
++    attributes = ROOT / ".gitattributes"
++    assert attributes.exists(), "missing .gitattributes"
++    attributes_text = attributes.read_text(encoding="utf-8")
++    assert "* text=auto eol=lf" in attributes_text
++
++    for relative_path in FORMAL_UTF8_FILES + (".gitattributes",):
++        raw = (ROOT / relative_path).read_bytes()
++        assert not raw.startswith(b"\xef\xbb\xbf"), f"UTF-8 BOM: {relative_path}"
++        raw.decode("utf-8", errors="strict")
