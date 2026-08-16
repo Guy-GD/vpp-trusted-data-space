@@ -13,6 +13,7 @@ def test_secure_aggregate():
             "updates": [
                 {
                     "participantDid": f"did:vpp:participant:{i}",
+                    "sampleCount": 10,
                     "modelUpdateUri": f"memory://updates/{i}.json",
                     "updateHash": f"sha256:update{i}",
                 }
@@ -27,7 +28,7 @@ def test_secure_aggregate():
     assert data["privacyMode"] == "secure_masking"
 def test_encrypt_endpoint():
     response = client.post(
-        "/api/v1/privacy/encrypt",
+        "/api/v1/privacy/model-updates/encrypt",
         json={"plaintext": "sensitive_data", "participantDid": "did:vpp:participant:1"}
     )
     assert response.status_code == 200
@@ -35,7 +36,7 @@ def test_encrypt_endpoint():
 
 def test_mask_endpoint():
     response = client.post(
-        "/api/v1/privacy/mask",
+        "/api/v1/privacy/model-updates/mask",
         json={"updateId": "update_123", "maskingType": "random"}
     )
     assert response.status_code == 200

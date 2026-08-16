@@ -5,6 +5,7 @@ from datetime import datetime
 
 class ModelUpdate(BaseModel):
     participantDid: str = Field(..., description="Participant DID")
+    sampleCount: int = Field(..., description="Number of samples in this update")
     modelUpdateUri: str = Field(..., description="URI to model update")
     updateHash: str = Field(..., description="SHA256 hash of update")
 

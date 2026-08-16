@@ -16,8 +16,9 @@ class PrivacyService:
         if len(request.updates) < 2:
             raise ValueError("Need at least 2 updates for aggregation")
         
-        # 生成聚合ID
-        aggregate_id = f"aggregate_{uuid.uuid4().hex[:16]}"
+        # 生成聚合ID（使用公共包的新 ID 生成器）
+        from vpp_common import new_id
+        aggregate_id = new_id("aggregate_")
         
         # 模拟聚合（生成哈希值作为指纹）
         aggregate_hash = self._simulate_aggregation(request)
@@ -52,7 +53,9 @@ class PrivacyService:
 
     def encrypt_data(self, plaintext: str, participant_did: str) -> Dict:
         """模拟加密 - 存储记录但绝不返回原始数据"""
-        encryption_id = f"enc_{uuid.uuid4().hex[:16]}"
+        from vpp_common import new_id
+        # 使用允许的 ID 前缀（evt_ 用于事件/操作）
+        encryption_id = new_id("evt_")
         self.repo.save_encryption_record(encryption_id, {
             "participant_did": participant_did,
             "encrypted": f"encrypted:{plaintext[::-1]}",  # 简单模拟：反转字符串
@@ -66,7 +69,9 @@ class PrivacyService:
 
     def mask_update(self, update_id: str, masking_type: str) -> Dict:
         """模拟掩码 - 保护原始更新数据"""
-        mask_id = f"mask_{uuid.uuid4().hex[:16]}"
+        from vpp_common import new_id
+        # 使用允许的 ID 前缀（evt_ 用于事件/操作）
+        mask_id = new_id("evt_")
         self.repo.save_mask_record(mask_id, {
             "update_id": update_id,
             "masking_type": masking_type,
