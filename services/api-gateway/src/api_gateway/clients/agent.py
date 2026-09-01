@@ -1,32 +1,19 @@
-from uuid import uuid4
+from .base import BaseClient
+from ..settings import get_settings
 
-from .base import BaseMockClient
 
-
-class AgentClient(BaseMockClient):
-
-    def __init__(self):
+class AgentClient(BaseClient):
+    def __init__(self, *, transport=None):
+        settings = get_settings()
         super().__init__(
-            "agent-service"
+            settings.agent_service_url,
+            timeout=settings.http_timeout_seconds,
+            transport=transport,
         )
 
-    async def generate_report(
-        self,
-        model_version: str,
-        trace_id: str,
-    ) -> dict:
-        """
-        Generate final agent report.
-        """
-
-        return {
-            "agentReportId": (
-                f"report_{uuid4().hex[:8]}"
-            ),
-            "modelVersion": model_version,
-            "recommendation": (
-                "day-ahead trading optimization"
-            ),
-            "status": "AGENT_COMPLETED",
-            "traceId": trace_id,
-        }
+    async def generate_report(self, model_version: str, trace_id: str) -> dict:
+        return await self.post(
+            "/api/v1/agent/audit-report",
+            trace_id,
+            {"modelVersion": model_version},
+        )

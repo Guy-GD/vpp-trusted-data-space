@@ -1,28 +1,19 @@
-from uuid import uuid4
+from .base import BaseClient
+from ..settings import get_settings
 
-from .base import BaseMockClient
 
-
-class IdentityClient(BaseMockClient):
-
-    def __init__(self):
+class IdentityClient(BaseClient):
+    def __init__(self, *, transport=None):
+        settings = get_settings()
         super().__init__(
-            "identity-service"
+            settings.identity_service_url,
+            timeout=settings.http_timeout_seconds,
+            transport=transport,
         )
 
-    async def authorize(
-        self,
-        participants: list[str],
-        trace_id: str,
-    ) -> dict:
-        """
-        Verify participant identities.
-        """
-
-        return {
-            "authorizationId": f"auth_{uuid4().hex[:8]}",
-            "participants": participants,
-            "authorized": True,
-            "status": "AUTHORIZED",
-            "traceId": trace_id,
-        }
+    async def authorize(self, participants: list[str], trace_id: str) -> dict:
+        return await self.post(
+            "/api/v1/auth/requests",
+            trace_id,
+            {"participants": participants},
+        )

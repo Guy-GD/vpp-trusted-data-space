@@ -65,26 +65,3 @@ class HealthData(BaseModel):
     service: str
 
     status: str
-
-from datetime import datetime
-
-
-class AuditEventResponse(BaseModel):
-
-    stage: str
-
-    service: str
-
-    action: str
-
-    status: str
-
-    timestamp: datetime
-
-
-
-class AuditTrailResponse(BaseModel):
-
-    businessId: str
-
-    auditTrail: list[AuditEventResponse]

@@ -1,31 +1,23 @@
-from uuid import uuid4
+from .base import BaseClient
+from ..settings import get_settings
 
-from .base import BaseMockClient
 
-
-class IngestionClient(BaseMockClient):
-
-    def __init__(self):
+class IngestionClient(BaseClient):
+    def __init__(self, *, transport=None):
+        settings = get_settings()
         super().__init__(
-            "data-ingestion"
+            settings.ingestion_service_url,
+            timeout=settings.http_timeout_seconds,
+            transport=transport,
         )
 
-    async def register_asset(
-        self,
-        meter_data: dict,
-        trace_id: str,
-    ) -> dict:
-        """
-        Register collected data asset.
-        """
-
-        return {
-            "assetId": f"asset_{uuid4().hex[:8]}",
-            "source": "meter-simulator",
-            "status": "REGISTERED",
-            "meterCount": meter_data.get(
-                "count",
-                0,
-            ),
-            "traceId": trace_id,
-        }
+    async def register_asset(self, meter_data: dict, trace_id: str) -> dict:
+        return await self.post(
+            "/api/v1/data/ingest",
+            trace_id,
+            {
+                "readingId": meter_data.get("readingId"),
+                "meters": meter_data.get("meters", []),
+                "count": meter_data.get("count", 0),
+            },
+        )

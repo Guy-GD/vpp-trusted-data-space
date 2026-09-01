@@ -1,27 +1,19 @@
-from uuid import uuid4
+from .base import BaseClient
+from ..settings import get_settings
 
-from .base import BaseMockClient
 
-
-class LedgerClient(BaseMockClient):
-
-    def __init__(self):
+class LedgerClient(BaseClient):
+    def __init__(self, *, transport=None):
+        settings = get_settings()
         super().__init__(
-            "trusted-ledger"
+            settings.ledger_service_url,
+            timeout=settings.http_timeout_seconds,
+            transport=transport,
         )
 
-    async def record(
-        self,
-        asset_id: str,
-        trace_id: str,
-    ) -> dict:
-        """
-        Store evidence record.
-        """
-
-        return {
-            "ledgerId": f"ledger_{uuid4().hex[:8]}",
-            "assetId": asset_id,
-            "recordStatus": "CONFIRMED",
-            "traceId": trace_id,
-        }
+    async def record(self, asset_id: str, trace_id: str) -> dict:
+        return await self.post(
+            "/api/v1/ledger/events",
+            trace_id,
+            {"assetId": asset_id, "eventType": "data_asset_registered"},
+        )

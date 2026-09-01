@@ -1,231 +1,64 @@
-from uuid import uuid4
+import hashlib
+import json
 
-from fastapi import (
-    APIRouter,
-    Header,
-    HTTPException,
-    Request,
-)
+from fastapi import APIRouter, Header, Request
 
-from .schemas import DemoRequest
+from vpp_common import ErrorCode, ServiceError, success
+
+from .schemas import DemoRequest, HealthData
 from .repository import repository
 from .workflows.demo import DemoWorkflow
-from .audit import audit_repository
 from .idempotency import idempotency_service
 
 
-router = APIRouter(
-    prefix="/api/v1"
-)
-
+router = APIRouter(prefix="/api/v1")
 
 workflow = DemoWorkflow()
 
 
+def _request_hash(payload: dict) -> str:
+    content = json.dumps(payload, sort_keys=True)
+    return hashlib.sha256(content.encode()).hexdigest()
+
+
 @router.get("/health")
-async def health(
-    request: Request,
-):
-
-    return {
-        "code": 0,
-        "message": "ok",
-        "data": {
-            "service": "api-gateway",
-            "status": "healthy",
-        },
-        "traceId": request.state.trace_id,
-    }
-
+async def health(request: Request):
+    return success(
+        HealthData(service="api-gateway", status="healthy"),
+        trace_id=request.state.trace_id,
+    )
 
 
 @router.post("/demo/run")
 async def run_demo(
     demo_request: DemoRequest,
     request: Request,
-    x_trace_id: str | None = Header(
-        default=None
-    ),
     idempotency_key: str | None = Header(
         default=None,
-        alias="Idempotency-Key"
+        alias="Idempotency-Key",
     ),
 ):
+    trace_id = request.state.trace_id
+    fingerprint = _request_hash(demo_request.model_dump())
 
-    trace_id = (
-        x_trace_id
-        or request.state.trace_id
-        or str(uuid4())
-    )
+    # ---- 幂等检查：同 key 同请求体 -> 返回旧结果；同 key 异请求体 -> 40901 ----
+    if idempotency_key:
+        old_result = idempotency_service.check(idempotency_key, fingerprint)
+        if old_result is not None:
+            return success(old_result, trace_id=trace_id)
 
-
-    # =========================
-    # 幂等检查
-    # =========================
+    result = await workflow.run(demo_request, trace_id)
+    response_data = result.model_dump()
 
     if idempotency_key:
+        idempotency_service.save(idempotency_key, fingerprint, response_data)
 
-        old_result = (
-            idempotency_service.check(
-                idempotency_key
-            )
-        )
+    return success(response_data, trace_id=trace_id)
 
 
-        if old_result:
-
-            return {
-                "code": 0,
-                "message": "ok",
-                "data": old_result,
-                "traceId": trace_id,
-            }
-
-
-
-    # =========================
-    # 执行Demo工作流
-    # =========================
-
-    result = await workflow.run(
-        demo_request,
-        trace_id,
-    )
-
-
-    response_data = (
-        result.model_dump()
-    )
-
-
-
-    # =========================
-    # 保存幂等结果
-    # =========================
-
-    if idempotency_key:
-
-        idempotency_service.save(
-            idempotency_key,
-            response_data,
-        )
-
-
-
-    return {
-        "code": 0,
-        "message": "ok",
-        "data": response_data,
-        "traceId": trace_id,
-    }
-
-
-
-
-@router.get(
-    "/demo/status/{business_id}"
-)
-async def demo_status(
-    business_id: str,
-):
-
-    state = repository.get(
-        business_id
-    )
-
-
+@router.get("/demo/status/{business_id}")
+async def demo_status(business_id: str, request: Request):
+    state = repository.get(business_id)
     if state is None:
-
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "message":
-                "businessId not found"
-            },
-        )
-
-
-
-    return {
-        "code": 0,
-        "message": "ok",
-        "data": state.model_dump(),
-        "traceId": getattr(
-            state,
-            "trace_id",
-            None
-        ),
-    }
-
-
-
-
-@router.get(
-    "/demo/audit/{business_id}"
-)
-async def get_audit(
-    business_id: str,
-):
-
-    events = (
-        audit_repository
-        .list_by_business(
-            business_id
-        )
-    )
-
-
-    return {
-        "code": 0,
-        "message": "ok",
-        "data": {
-            "businessId": business_id,
-            "auditTrail": [
-                event.model_dump()
-                for event in events
-            ]
-        }
-    }
-
-
-
-
-@router.get(
-    "/demo/audit/verify/{business_id}"
-)
-async def verify_audit(
-    business_id: str,
-):
-
-    valid = (
-        audit_repository
-        .verify_chain(
-            business_id
-        )
-    )
-
-
-    events = (
-        audit_repository
-        .list_by_business(
-            business_id
-        )
-    )
-
-
-    return {
-        "code": 0,
-        "message": "ok",
-        "data": {
-            "businessId": business_id,
-            "valid": valid,
-            "eventCount": len(events),
-            "message":
-                (
-                    "audit chain verified"
-                    if valid
-                    else
-                    "audit chain invalid"
-                ),
-        }
-    }
+        raise ServiceError(ErrorCode.BUSINESS_NOT_FOUND)
+    return success(state.model_dump(), trace_id=request.state.trace_id)

@@ -1,9 +1,4 @@
-from uuid import uuid4
-import hashlib
-import json
-
-
-from ..audit import audit_service
+from vpp_common import new_id
 
 from ..clients.meter import MeterClient
 from ..clients.ingestion import IngestionClient
@@ -12,77 +7,45 @@ from ..clients.fl import FLClient
 from ..clients.privacy import PrivacyClient
 from ..clients.ledger import LedgerClient
 from ..clients.agent import AgentClient
-
-
 from ..repository import repository
-
-
-from ..schemas import (
-    DemoRequest,
-    DemoResult,
-    WorkflowState,
-)
-
+from ..schemas import DemoRequest, DemoResult, WorkflowState
 
 
 class DemoWorkflow:
     """
-    Demo workflow orchestration.
+    Demo workflow orchestration (7-stage skeleton).
 
-    Add audit trail support.
+    Downstream clients perform real HTTP calls.
     """
 
-
-    def __init__(self):
-
-        self.meter = MeterClient()
-
-        self.ingestion = IngestionClient()
-
-        self.identity = IdentityClient()
-
-        self.fl = FLClient()
-
-        self.privacy = PrivacyClient()
-
-        self.ledger = LedgerClient()
-
-        self.agent = AgentClient()
-
-
-
-    def _hash_request(
+    def __init__(
         self,
-        request: DemoRequest,
-    ) -> str:
+        *,
+        meter=None,
+        ingestion=None,
+        identity=None,
+        fl=None,
+        privacy=None,
+        ledger=None,
+        agent=None,
+    ):
+        self.meter = meter or MeterClient()
+        self.ingestion = ingestion or IngestionClient()
+        self.identity = identity or IdentityClient()
+        self.fl = fl or FLClient()
+        self.privacy = privacy or PrivacyClient()
+        self.ledger = ledger or LedgerClient()
+        self.agent = agent or AgentClient()
 
-        content = json.dumps(
-            request.model_dump(),
-            sort_keys=True,
-        )
+    def _hash_request(self, request: DemoRequest) -> str:
+        import hashlib
+        import json
+        content = json.dumps(request.model_dump(), sort_keys=True)
+        return hashlib.sha256(content.encode()).hexdigest()
 
-        return hashlib.sha256(
-            content.encode()
-        ).hexdigest()
-
-
-
-    async def run(
-        self,
-        request: DemoRequest,
-        trace_id: str,
-    ) -> DemoResult:
-
-
-        business_id = (
-            f"demo_{uuid4().hex[:8]}"
-        )
-
-
-        request_hash = self._hash_request(
-            request
-        )
-
+    async def run(self, request: DemoRequest, trace_id: str) -> DemoResult:
+        business_id = new_id("demo_")
+        request_hash = self._hash_request(request)
 
         state = WorkflowState(
             businessId=business_id,
@@ -91,250 +54,71 @@ class DemoWorkflow:
             currentStage="CREATED",
             traceId=trace_id,
         )
-
-
         repository.save(state)
 
-
         try:
-
-            # ==========================
-            # 1. Meter Data Collection
-            # ==========================
-
+            # 1. Meter data collection
             meter_data = await self.meter.collect_readings(
-                request.meterCount,
-                trace_id,
+                request.meterCount, trace_id
             )
-
-
-            state.currentStage = (
-                "DATA_COLLECTED"
-            )
-
+            state.currentStage = "DATA_COLLECTED"
             repository.save(state)
 
-
-            await audit_service.record(
-                trace_id,
-                business_id,
-                "DATA_COLLECTED",
-                "meter-simulator",
-                "collect_readings",
-            )
-
-
-
-            # ==========================
-            # 2. Data Registration
-            # ==========================
-
-            asset = await self.ingestion.register_asset(
-                meter_data,
-                trace_id,
-            )
-
-
-            state.currentStage = (
-                "DATA_REGISTERED"
-            )
-
+            # 2. Data registration
+            asset = await self.ingestion.register_asset(meter_data, trace_id)
+            asset_id = asset["assetId"]
+            state.currentStage = "DATA_REGISTERED"
             repository.save(state)
 
-
-            await audit_service.record(
-                trace_id,
-                business_id,
-                "DATA_REGISTERED",
-                "data-ingestion",
-                "register_asset",
-            )
-
-
-
-            # ==========================
-            # 3. Identity Authorization
-            # ==========================
-
-            await self.identity.authorize(
-                request.participants,
-                trace_id,
-            )
-
-
-            state.currentStage = (
-                "AUTHORIZED"
-            )
-
+            # 3. Identity authorization
+            await self.identity.authorize(request.participants, trace_id)
+            state.currentStage = "AUTHORIZED"
             repository.save(state)
 
-
-            await audit_service.record(
-                trace_id,
-                business_id,
-                "AUTHORIZED",
-                "identity-service",
-                "authorize",
-            )
-
-
-
-            # ==========================
-            # 4. Federated Learning
-            # ==========================
-
+            # 4. Federated learning
             model = await self.fl.train(
-                asset["assetId"],
-                request.trainingRounds,
-                trace_id,
+                asset_id, request.trainingRounds, trace_id
             )
-
-
-            state.currentStage = (
-                "MODEL_READY"
-            )
-
+            model_version = model["globalModelVersion"]
+            state.currentStage = "MODEL_READY"
             repository.save(state)
 
-
-            await audit_service.record(
-                trace_id,
-                business_id,
-                "MODEL_READY",
-                "federated-learning",
-                "train",
-                {
-                    "modelVersion":
-                    model["globalModelVersion"]
-                },
-            )
-
-
-
-            # ==========================
-            # 5. Privacy Compute
-            # ==========================
-
-            await self.privacy.execute(
-                model["globalModelVersion"],
-                trace_id,
-            )
-
-
-            state.currentStage = (
-                "PRIVACY_COMPLETED"
-            )
-
+            # 5. Privacy compute
+            await self.privacy.execute(model_version, trace_id)
+            state.currentStage = "PRIVACY_COMPLETED"
             repository.save(state)
 
-
-            await audit_service.record(
-                trace_id,
-                business_id,
-                "PRIVACY_COMPLETED",
-                "privacy-compute",
-                "execute",
-            )
-
-
-
-            # ==========================
-            # 6. Ledger Record
-            # ==========================
-
-            await self.ledger.record(
-                asset["assetId"],
-                trace_id,
-            )
-
-
-            state.currentStage = (
-                "LEDGER_RECORDED"
-            )
-
+            # 6. Ledger record
+            await self.ledger.record(asset_id, trace_id)
+            state.currentStage = "LEDGER_RECORDED"
             repository.save(state)
 
-
-            await audit_service.record(
-                trace_id,
-                business_id,
-                "LEDGER_RECORDED",
-                "trusted-ledger",
-                "record",
-            )
-
-
-
-            # ==========================
-            # 7. Agent Report
-            # ==========================
-
-            report = await self.agent.generate_report(
-                model["globalModelVersion"],
-                trace_id,
-            )
-
-
-            state.currentStage = (
-                "AGENT_COMPLETED"
-            )
-
+            # 7. Agent report
+            report = await self.agent.generate_report(model_version, trace_id)
+            state.currentStage = "AGENT_COMPLETED"
             repository.save(state)
-
-
-            await audit_service.record(
-                trace_id,
-                business_id,
-                "AGENT_COMPLETED",
-                "agent-service",
-                "generate_report",
-            )
-
-
 
             result = DemoResult(
                 businessId=business_id,
-                assetId=asset["assetId"],
-                globalModelVersion=model[
-                    "globalModelVersion"
-                ],
-                agentReportId=report[
-                    "agentReportId"
-                ],
+                assetId=asset_id,
+                globalModelVersion=model_version,
+                agentReportId=report["agentReportId"],
                 status="COMPLETED",
                 metrics={
-                    "accuracy": model["accuracy"],
-                    "rounds": model["rounds"],
+                    "accuracy": model.get("accuracy"),
+                    "rounds": model.get("rounds"),
                 },
             )
 
-
             state.status = "COMPLETED"
-
-            state.currentStage = (
-                "AGENT_COMPLETED"
-            )
-
+            state.currentStage = "AGENT_COMPLETED"
             state.result = result
-
-
             repository.save(state)
-
 
             return result
 
-
-
         except Exception:
-
             state.status = "FAILED"
-
-            state.currentStage = (
-                "ERROR"
-            )
-
-
+            state.currentStage = "ERROR"
             repository.save(state)
-
-
             raise

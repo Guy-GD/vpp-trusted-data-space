@@ -1,32 +1,19 @@
-from uuid import uuid4
+from .base import BaseClient
+from ..settings import get_settings
 
-from .base import BaseMockClient
 
-
-class FLClient(BaseMockClient):
-
-    def __init__(self):
+class FLClient(BaseClient):
+    def __init__(self, *, transport=None):
+        settings = get_settings()
         super().__init__(
-            "federated-learning"
+            settings.fl_service_url,
+            timeout=settings.http_timeout_seconds,
+            transport=transport,
         )
 
-    async def train(
-        self,
-        asset_id: str,
-        rounds: int,
-        trace_id: str,
-    ) -> dict:
-        """
-        Simulate federated learning training.
-        """
-
-        return {
-            "globalModelVersion": (
-                f"model_{uuid4().hex[:6]}"
-            ),
-            "rounds": rounds,
-            "assetId": asset_id,
-            "accuracy": 0.96,
-            "status": "MODEL_READY",
-            "traceId": trace_id,
-        }
+    async def train(self, asset_id: str, rounds: int, trace_id: str) -> dict:
+        return await self.post(
+            "/api/v1/fl/tasks",
+            trace_id,
+            {"assetId": asset_id, "rounds": rounds},
+        )

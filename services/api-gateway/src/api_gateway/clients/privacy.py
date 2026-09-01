@@ -1,28 +1,19 @@
-from uuid import uuid4
+from .base import BaseClient
+from ..settings import get_settings
 
-from .base import BaseMockClient
 
-
-class PrivacyClient(BaseMockClient):
-
-    def __init__(self):
+class PrivacyClient(BaseClient):
+    def __init__(self, *, transport=None):
+        settings = get_settings()
         super().__init__(
-            "privacy-compute"
+            settings.privacy_service_url,
+            timeout=settings.http_timeout_seconds,
+            transport=transport,
         )
 
-    async def execute(
-        self,
-        model_version: str,
-        trace_id: str,
-    ) -> dict:
-        """
-        Simulate privacy computation.
-        """
-
-        return {
-            "taskId": f"privacy_{uuid4().hex[:8]}",
-            "modelVersion": model_version,
-            "algorithm": "secure-aggregation",
-            "status": "COMPLETED",
-            "traceId": trace_id,
-        }
+    async def execute(self, model_version: str, trace_id: str) -> dict:
+        return await self.post(
+            "/api/v1/privacy/secure-aggregate",
+            trace_id,
+            {"modelVersion": model_version},
+        )

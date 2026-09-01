@@ -17,8 +17,10 @@ def test_health():
     body = response.json()
 
     assert body["code"] == 0
-
+    assert "timestamp" in body
+    assert body["traceId"].startswith("trace_")
     assert (
         body["data"]["status"]
         == "healthy"
     )
+    
